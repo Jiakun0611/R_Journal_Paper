@@ -1,0 +1,213 @@
+---
+title: "Simulation Study"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+This simulation study evaluates the performance of the multi-reference calibration method for estimating prevalence in a multi-level categorical outcome setting. The data generation and sampling design follows Section 6 of Landsman et al. (2026). The original study used continuous and binary outcomes, the present study extends the simulation framework to a three-level categorical outcome with three population domains. Performance is evaluated for the prevalence of each outcome category within each domain. The study also compares the multi-reference calibration estimator with and without cumulative precalibration.
+
+## Finite population and target parameters
+
+A finite population of size $N=500{,}000$ is generated and held fixed across simulation replications. The finite population contains four auxiliary variables with one categorical domain variable. The domain variable $x_1$ has three levels, denoted by A, B, and C, and is generated according to
+
+$$\Pr(x_{1i}=\mathrm{A})=0.50,\qquad
+\Pr(x_{1i}=\mathrm{B})=0.25,\qquad
+\Pr(x_{1i}=\mathrm{C})=0.25.$$
+
+Let $I_{Bi}=\mathbb{I}(x_{1i}=\mathrm{B})$ and $I_{Ci}=\mathbb{I}(x_{1i}=\mathrm{C})$. Three continuous auxiliary variables are generated as
+
+$$\begin{aligned}
+x_{2i} &= \nu_{2i}+0.3I_{Bi}+0.3I_{Ci},\\
+x_{3i} &= \nu_{3i}+0.2(I_{Bi}+I_{Ci}+x_{2i}),\\
+x_{4i} &= \nu_{4i}+0.1(I_{Bi}+I_{Ci}+x_{2i}+x_{3i}),
+\end{aligned}$$
+
+where $\nu_{2i}\sim\mathrm{Unif}(0,2)$, $\nu_{3i}\sim\mathrm{Exp}(1)$, and $\nu_{4i}\sim\chi^2(4)$.
+
+A latent continuous outcome variable is generated according to
+
+$$y_i^*
+=
+-0.5I_{Bi}-I_{Ci}-x_{2i}+x_{3i}+x_{4i}
++\epsilon_i,$$
+
+where $\epsilon_i\sim N(0,1)$. The observed outcome $y_i$ is a three-level categorical variable with levels Low, Medium, and High. The category labels are assigned based on the empirical 35th and 70th percentiles of $y^*$ in the finite population:
+
+$$y_i =
+\begin{cases}
+\mathrm{Low}, & y_i^*\leq c_1,\\
+\mathrm{Medium}, & c_1<y_i^*\leq c_2,\\
+\mathrm{High}, & y_i^*>c_2,
+\end{cases}$$
+
+where $c_1$ and $c_2$ denote the 35th and 70th percentiles of $y^*$. Therefore, the marginal finite population prevalence of Low, Medium, and High are approximately 0.35, 0.35, and 0.30. Since the domain variable $x_1$ affects the outcome distribution, the category prevalence differ across the three domains.
+
+The parameters of interest are the domain-specific prevalence for each outcome category. For domain $d$ and outcome category $\ell$, the target parameter is defined as
+
+$$P_{d\ell}
+=
+\frac{
+\sum_{i\in FP}
+\mathbb{I}(x_{1i}=d)
+\mathbb{I}(y_i=\ell)
+}{
+\sum_{i\in FP}
+\mathbb{I}(x_{1i}=d)
+},$$
+
+where $d\in\{\mathrm{A},\mathrm{B},\mathrm{C}\}$ and $\ell\in\{\mathrm{Low},\mathrm{Medium},\mathrm{High}\}$. The nine finite-population domain-specific prevalence are calculated before sampling and treated as the true values for evaluating estimator performance.
+
+## Sampling design
+
+Two probability reference surveys and one nonprobability sample are independently selected from the finite population in each replication.
+
+The first probability reference survey, $s_{p1}$, is selected by Poisson sampling with expected sample size $n_{p1}=12{,}500$. Its inclusion probabilities are
+
+$$\pi_i^{(p1)}
+=
+\frac{n_{p1}q_i}{\sum_{j\in\mathrm{FP}}q_j},
+\qquad
+q_i=c_1+x_{3i}+0.03y_i^*,$$
+
+where $c_1$ is chosen so that the ratio of the largest to the smallest value of $q_i$ is 20.
+
+The second probability reference survey, $s_{p2}$, is selected by randomized systematic probability-proportional-to-size sampling with fixed sample size $n_{p2}=25{,}000$. Its first-order inclusion probabilities are proportional to
+
+$$z_i=0.05+x_{2i}.$$
+
+The nonprobability sample, $s_c$, is generated independently by Poisson sampling with expected size $n_c=2{,}500$. The participation probabilities follow
+
+$$\pi_i^c
+=
+\exp\left(
+\beta_0
++0.18I_{Bi}
++0.18I_{Ci}
++0.18x_{2i}
+-0.27x_{3i}
+-0.1x_{4i}
+\right),$$
+
+where $\beta_0$ is selected so that $\sum_{i\in\mathrm{FP}}\pi_i^c=2{,}500$.
+
+The outcome $y$ and all four auxiliary variables are observed in the nonprobability sample. In contrast, $s_{p1}$ contains only $x_1$ and $x_2$, whereas $s_{p2}$ contains only $x_3$ and $x_4$. The two probability reference surveys therefore supply complementary auxiliary information, and neither survey alone contains the complete set of variables in the participation model.
+
+## Simulation scenarios and estimation
+
+Each simulated dataset was analyzed using the multi-reference calibration method implemented by `est_pw()`. The participation formula was
+
+``` r
+p_formula = list(
+  ~ x1 + x2,
+  ~ x3 + x4
+)
+```
+
+corresponding to the auxiliary variables observed in $s_{p1}$ and $s_{p2}$. Two precalibration cases were compared:
+
+1.  **No precalibration:** multi-reference calibration was fitted with `precali = FALSE`.
+2.  **Precalibration:** multi-reference calibration was fitted with `precali = TRUE`.
+
+Since there were no auxiliary variables shared between the probability reference surveys, cumulative precalibration in the second case aligned only the sum of the survey weights (the estimated finite population size) before the pseudo-weight estimation step. For `sp_order`, the package used its default size-based ordering. Therefore, the larger survey, $s_{p2}$, was processed first, and its estimated population size was used as the target when precalibrating $s_{p1}$.
+
+For each fitted pseudo-weight object, `pwmean()` was called with `y = "y"` and `zcol = "x1"`. Since $y$ was a factor, the function estimated the prevalence of each outcome category. Since $x_1$ was supplied as the domain variable, separate prevalence estimates were returned for domains A, B, and C. Each fitted model therefore produced nine pseudo-weighted prevalence, corresponding standard errors and 95% confidence interval.
+
+## Evaluation metrics
+
+For each domain $d$, outcome category $\ell$, and precalibration case $m$, the simulation was repeated $B = 4000$ times. In replication $b$, let $\widehat{P}_{d\ell m}^{(b)}$ denote the estimated prevalence and let $\widehat{\mathrm{SE}}_{d\ell m}^{(b)}$ denote its analytic standard error. The true finite population prevalence is denoted by $P_{d\ell}$.
+
+To evaluate the point estimators, relative bias (RB) and mean squared error (MSE) were calculated as
+
+$$\mathrm{RB}(\%)
+=
+\frac{100}{B}
+\sum_{b=1}^{B}
+\frac{\widehat{P}_{d\ell m}^{(b)}-P_{d\ell}}{P_{d\ell}}.$$
+
+and
+
+$$\mathrm{MSE}\times100
+=
+\frac{100}{B}
+\sum_{b=1}^{B}
+\left(\widehat{P}_{d\ell m}^{(b)}-P_{d\ell}\right)^2.$$
+
+To evaluate the analytic variance estimators, the average estimated variance, multiplied by 100, was calculated as
+
+$$\overline{v}\times100
+=
+\frac{100}{B}
+\sum_{b=1}^{B}
+\left\{\widehat{\mathrm{SE}}_{d\ell m}^{(b)}\right\}^2$$
+
+The standard error ratio (SER) compares the average estimated standard error with the empirical standard deviation of the prevalence estimates:
+
+$$\mathrm{SER}
+=
+\frac{
+B^{-1}
+\sum_{b=1}^{B}
+\widehat{\mathrm{SE}}_{d\ell m}^{(b)}
+}{
+\mathrm{SD}\left(
+\widehat{P}_{d\ell m}^{(1)},\ldots,
+\widehat{P}_{d\ell m}^{(B)}
+\right)
+}.$$
+
+Values of SER near 1 indicate agreement between the analytic and empirical standard errors.
+
+Finally, coverage probability (CP) was calculated as the proportion of nominal 95% Wald confidence intervals that contained the true prevalence:
+
+$$\mathrm{CP}
+=
+\frac{1}{B}
+\sum_{b=1}^{B}
+\mathbb{I}\left[
+\widehat{P}_{d\ell m}^{(b)}-1.96\widehat{\mathrm{SE}}_{d\ell m}^{(b)}
+\leq P_{d\ell}\leq
+\widehat{P}_{d\ell m}^{(b)}+1.96\widehat{\mathrm{SE}}_{d\ell m}^{(b)}
+\right].$$
+
+CP was reported as a proportion between 0 and 1. The metrics are reported as `RB(%)`, `v(*100)`, `MSE(*100)`, `SER`, and `CP` in the simulation results table below.
+
+## Simulation results
+
+Table 1 summarizes the performance of the multi-reference calibration estimators for estimating domain-specific, category-specific prevalence, with and without cumulative precalibration.
+
+```{r simulation-results-table}
+results_table <- data.frame(
+  domain = rep(c("A", "B", "C"), times = 6),
+  outcome = rep(
+    rep(c("Low", "Medium", "High"), each = 3),
+    times = 2
+  ),
+  precali_case = rep(
+    c("No precalibration", "Precalibration"),
+    each = 9
+  ),
+  `RB(%)` = rep("", 18),
+  `v(*100)` = rep("", 18),
+  `MSE(*100)` = rep("", 18),
+  SER = rep("", 18),
+  CP = rep("", 18),
+  check.names = FALSE
+)
+
+knitr::kable(
+  results_table,
+  align = rep("c", 8),
+  caption = paste(
+    "Simulation Results"
+  )
+)
+```
+
+*Note:* RB is relative bias in percent; $v\times100$ is the average estimated analytic variance multiplied by 100; MSE$\times100$ is the mean squared error multiplied by 100; SER is the ratio of the average estimated standard error to the empirical standard deviation of the point estimates; and CP is the empirical coverage proportion of nominal 95% Wald confidence intervals.
