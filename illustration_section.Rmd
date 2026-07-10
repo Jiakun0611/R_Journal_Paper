@@ -12,7 +12,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-This section illustrates how `nonprobsampling` can be used with multiple probability reference surveys using the example datasets included in the package. Because the basic function workflow has already been introduced, the emphasis here is on the applied use of the multi-reference method. Specifically, the section explains why multiple reference surveys are useful in this example, how the multi-reference interface is specified in practice, how to interpret the output from `est_pw()` and `pwmean()`, and how to assess whether the numerical solver has converged satisfactorily. The section also evaluates the resulting pseudo-weighted estimates by comparing them with the unweighted estimates from the nonprobability sample and with the true finite population means used as benchmarks.
+This section illustrates how `nonprobsampling` can be used with multiple probability reference surveys using the example datasets included in the package. Because the basic function workflow has already been introduced, the emphasis here is on the applied use of the multi-reference method. Specifically, the section explains why multiple reference surveys are useful in this example, how the multi-reference interface is specified in practice, how to interpret the output from `est_pw()` and `pwmean()`, and how to assess whether the numerical solver has converged successfully. The section also evaluates the resulting pseudo-weighted estimates by comparing them with the unweighted estimates from the nonprobability sample and with the true finite population means used as benchmarks.
 
 ## Example data
 
@@ -24,19 +24,26 @@ data("sp1")
 data("sp2")
 ```
 
-The illustration uses the example datasets included in nonprobsampling. These datasets are used to demonstrate estimation of the mean serum prostate-specific antigen (PSA) level among U.S. men aged 55 years and older. The outcome variable is psa_level (ng/mL), a numeric measure of serum PSA level.
+The illustration uses the example datasets included in `nonprobsampling`. These datasets are used to demonstrate estimation of the mean serum prostate-specific antigen (PSA) level among U.S. men aged 55 years and older. The outcome of interest is `psa_level` (ng/mL), a continuous measure of serum PSA level stored as a numeric variable.
 
 ### Construction of the `sc` sample
 
 *Dr. Landsman please add here*
 
-The dataset sc represents the nonprobability sample to be adjusted. It contains the outcome variable psa_level, along with auxiliary variables related to participation.
+**@JIAKUN, MAKE SURE ALL VARIABLE NAMES AND DATA SETS ARE INSIDE QUOTES ``.**
+** WHAT IS CORRECT, DATASET or DATA SET?**
+
+The dataset `sc` represents the nonprobability sample to be adjusted. It contains the outcome variable `psa_level`, along with auxiliary variables related to participation.
 
 ### Probability reference surveys
 
-The datasets sp1 and sp2 represent probability reference surveys and provide external auxiliary information for estimating pseudo-weights. Notably, psa_level is also available in sp1. Although outcomes are typically observed only in the nonprobability sample, including the outcome in the participation model may help reduce bias when participation depends on the outcome.
+**NEED TO DEFINE NHAMES AND NHIS - GOOD TO INCLUDE WHAT THESE SURVEYS MEASURE IN GENERAL**
 
-For illustration, all shared variables have already been harmonized across the example datasets. Variable names, factor levels, and category definitions are consistent. In user-supplied data, this harmonization must be completed before calling est_pw(), because the package matches variables by name and assumes that variables with the same name have compatible meanings and coding across data sources.
+The datasets sp1 and sp2 represent probability reference surveys and provide external auxiliary information for estimating pseudo-weights. Notably, psa_level is also available in sp1. Although outcomes are typically observed only in the nonprobability sample, including the outcome in the participation model may help reduce bias when the participation probability also depends on the outcome.
+
+For illustration, all shared variables have already been harmonized across the example datasets. Variable names, factor levels, and category definitions are consistent. In user-supplied data, this harmonization must be completed before calling est_pw(), because the package assumes that variables with the same name have compatible meanings and coding across data sources.
+
+**TABLES NEED TO BE NUMBERED AND REFERENCED IN THE TEXT**
 
 ```{r data-summary, echo=FALSE}
 dataset_info <- data.frame(
@@ -65,7 +72,7 @@ knitr::kable(
 
 ### Survey design objects
 
-Before pseudo-weight estimation, each probability reference survey is represented as a `survey` design object. These objects store the survey design information used by `nonprobsampling` when estimating pseudo-weights and computing standard errors.
+Before pseudo-weight estimation, each probability reference survey needs to be represented as a `survey` design object. These objects store the survey design information used by `nonprobsampling` when estimating pseudo-weights and computing standard errors.
 
 ```{r survey-designs}
 ref1_design <- survey::svydesign(
@@ -85,9 +92,11 @@ ref2_design <- survey::svydesign(
 )
 ```
 
-The resulting objects, `ref1_design` and `ref2_design`, are then supplied to `est_pw()` together with the nonprobability sample.
+The resulting objects, `ref1_design` and `ref2_design`, are then supplied to `est_pw()` together with the nonprobability sample, `sc`.
 
 ### Motivation for the multi-reference method
+
+**BRING THIS SECTION BEFORE OR RIGHT AFTER PROBABILITY REFERENCE SURVEYS?**
 
 These datasets illustrate why multiple reference surveys are needed in practice. Both reference surveys contain shared variables such as agecat, race and comorbidity. In addition, the first reference survey, sp1, includes variables such as education and pros_enlarged, whereas the second reference survey, sp2, includes variables such as BMI and diabetes. These additional variables are likely related to participation. Relying on a single reference survey may limit the set of available auxiliary variables and lead to less effective adjustment if important variables are missing. The multi-reference method combines variables from both surveys when estimating pseudo-weights for the nonprobability sample, thereby improving the use of available information.
 
@@ -95,7 +104,7 @@ These datasets illustrate why multiple reference surveys are needed in practice.
 
 The example below is a typical use of the main function `est_pw()`, the two formulas in `p_formula` correspond to the two reference survey design objects supplied after `sc`. The formulas specify which auxiliary variables each reference survey contributes to the participation model. In general, users should include the relevant variables that are shared between the nonprobability sample and each reference survey, unless there is a practical reason to exclude them.
 
-Cumulative precalibration is recommended for most multi-reference analyses. In this example, with `precali = TRUE`,the package uses the overlapping variables specified in `p_formula`, such as `agecat`, `race`, and `comorbidity`, to align the reference surveys before estimating the final pseudo-weights.
+Cumulative precalibration is recommended for most multi-reference analyses. In this example, with `precali = TRUE`, the package uses the overlapping variables specified in `p_formula`, such as `agecat`, `race`, and `comorbidity`, to align the reference surveys before estimating the final pseudo-weights.
 
 The fitted object returned by `est_pw()` stores the estimated pseudo-weights and the information needed for subsequent outcome estimation. The `summary()` output provides detailed information about how the multi-reference calibration method was implemented, while the `print()` output gives a shorter overview of the fitted object.
 
@@ -122,11 +131,11 @@ The reference samples summary shows how variables are distributed and selected a
 
 The line beginning “Participation model involves the following variables” lists the full set of auxiliary variables used to estimate pseudo-weights for the nonprobability sample. The variable names appear in their model-matrix form. For example, the factor variable `agecat` is represented by the indicator columns `agecat2`, `agecat3`, and `agecat4`, with the omitted category serving as the reference category. Similarly, `race`, `BMI`, `education`, `diabetes`, `comorbidity`, and `pros_enlarged` are represented by one or more indicator columns. The variable `psa_level` is included as a numeric auxiliary variable. In total, the participation model uses demographic, health, education, prostate-related, and outcome-related information drawn from both reference surveys.
 
-The solver diagnostics indicate whether the estimating equations were solved satisfactorily. In this example, the solver is `nleqslv` with the Newton method. The termination code is 2, and the message states that the parameter values are within the tolerance `xtol`. This means that the solver stopped because successive parameter updates became sufficiently small. The final maximum absolute estimating equation value is `6.557e-07`. This value is slightly larger than the default function-value tolerance of `1e-8`, but it is still small in practical terms. The printed output therefore reports “converged (tolerance warning)” because convergence was reached through the parameter-step criterion rather than the function-value criterion. Together with the small number of iterations, this suggests that the numerical solution is acceptable for this illustration. In practice, users should inspect both the termination message and the final maximum absolute estimating equation value. A successful termination message, combined with a small `max|EE|`, supports treating the fitted pseudo-weights as numerically stable. If `max|EE|` is large, or if the solver stops without convergence, users should consider adjusting the solver controls, checking sparse factor levels, or revising the participation model.
+The solver diagnostics indicate whether the estimating equations were solved successfully. In this example, the solver is `nleqslv` with the Newton method. The termination code is 2, and the message states that the parameter values are within the tolerance `xtol`. This means that the solver stopped because successive parameter updates became sufficiently small. The final maximum absolute estimating equations value is `6.557e-07`. This value is slightly larger than the default function-value tolerance of `1e-8`, but it is still small in practical terms. The printed output therefore reports “converged (tolerance warning)” because convergence was reached through the parameter-step criterion rather than the function-value criterion. Together with the small number of iterations, this suggests that the numerical solution is acceptable for this illustration. In practice, users should inspect both the termination message and the final maximum absolute estimating equations value. A successful termination message, combined with a small `max|EE|`, supports treating the fitted pseudo-weights as numerically stable. If `max|EE|` is large, or if the solver stops without convergence, users should consider adjusting the solver controls, checking sparse factor levels, or revising the participation model.
 
-The participation model coefficients describe the fitted pseudo-weighting model. These coefficients are used to construct the pseudo-weights and should not be interpreted as regression coefficients from an outcome model. In applied use, they are mainly diagnostic. Users can inspect them to confirm that the model was fitted and to check whether any coefficient is unusually large, which may indicate numerical instability, sparse categories, or strong imbalance between the nonprobability sample and the reference surveys.
+The participation model coefficients describe the fitted pseudo-weighting model. These coefficients are used to construct the pseudo-weights and should not be interpreted as regression coefficients from an outcome model. In application, they are mainly diagnostic. Users can inspect them to confirm that the model was fitted and to check whether any coefficient is unusually large, which may indicate numerical instability, sparse categories, or strong imbalance between the nonprobability sample and the reference surveys.
 
-The final line of the summary reports that 1190 observations were deleted due to missingness in `sp[[1]]`. This refers to missing values in variables used from the first reference survey after the participation model was specified. Since the default missing-data handling uses complete cases for participation model variables, these observations are excluded from the pseudo-weight estimation step. This message is important because heavy missingness in a reference survey can reduce the amount of information contributed by that survey and should be considered when interpreting the results.
+The final line of the summary reports that 1190 observations were deleted due to missingness in `sp[[1]]`. This refers to (NUMBER OF ROWS WITH?) missing values in variables used from the first reference survey after the participation model was specified. Since the default missing data handling uses complete cases for participation model variables, these observations are excluded from the pseudo-weight estimation step. This message is important because heavy missingness in a reference survey can reduce the amount of information contributed by that survey and should be considered when interpreting the results.
 
 ```{r print-multi-ref-fit}
 print(fit_multi)
@@ -134,7 +143,7 @@ print(fit_multi)
 
 The shorter `print()` output summarizes the fitted object. It reports that the fitted object has class `"pw_fit"`, uses the multi-reference calibration method, and contains a participation model with 18 parameters. It also reports the convergence status and the distribution of the estimated pseudo-weights. In this example, the pseudo-weights range from 33,303 to 1,099,805, with a median of 100,305 and a mean of 106,180. The sum of pseudo-weights is 255,256,038, which represents the estimated population size implied by the pseudo-weighted nonprobability sample. Very large pseudo-weights indicates that some observations in the nonprobability sample represent population segments that are weakly represented in the observed sample. This is not necessarily a problem, but it should be checked because they can increase the variance of pseudo-weighted estimators.
 
-Taken together, these outputs show that the multi-reference fit uses the two reference surveys as intended. The larger survey, `sp2`, supplies the overlapping variables and its survey-specific variables, while `sp1` supplies the variables not available in `sp2`. The solver diagnostics do not suggest a serious numerical problem, and the pseudo-weight distribution gives a useful check on the scale and extremety of the pseudo-weights. These diagnostics should be checked before using the fitted object for outcome estimation with `pwmean()`.
+Taken together, these outputs show that the multi-reference fit uses the two reference surveys as intended. The larger survey, `sp2`, supplies the overlapping variables and its survey-specific variables, while `sp1` supplies the variables not available in `sp2`. The solver diagnostics do not suggest a serious numerical problem, and the pseudo-weight distribution gives a useful check on the scale and extremity of the pseudo-weights. These diagnostics should be checked before using the fitted object for outcome estimation with `pwmean()`.
 
 ## Mean estimation after pseudo-weighting
 
@@ -146,9 +155,7 @@ multi_psa <- pwmean(fit_multi, y = "psa_level")
 print(multi_psa)
 ```
 
-The printed output reports the pseudo-weightedu
-
-ndefined mean of serum PSA level as 1.893 ng/mL, with a standard error of 0.019 and a 95% confidence interval from 1.855 to 1.931. This estimate is obtained after adjusting the nonprobability sample with auxiliary information contributed by both reference surveys.
+The printed output reports the pseudo-weighted undefined mean of serum PSA level as 1.893 ng/mL, with a standard error of 0.019 and a 95% confidence interval from 1.855 to 1.931. This estimate is obtained after adjusting the nonprobability sample with auxiliary information contributed by both reference surveys.
 
 ```{r print-multi_psa}
 summary(multi_psa)
@@ -156,7 +163,7 @@ summary(multi_psa)
 
 The summary output also reports the unweighted estimate from the original nonprobability sample. Before adjustment, the unweighted mean of psa_level is 1.536 ng/mL, with a 95% confidence interval from 1.468 to 1.605. After pseudo-weighting, the estimated mean increases to 1.893 ng/mL, with a 95% confidence interval from 1.855 to 1.931. The upward shift suggests that the original nonprobability sample underrepresents individuals who have auxiliary-variable profiles associated with higher PSA levels. After the sample is adjusted to better match the auxiliary-variable information from the reference surveys, the estimated population mean becomes larger.
 
-Domain-specific estimates can be obtained by supplying a categorical variable to `zcol`. For example, the following code estimates the mean of `psa_level` separately within BMI categories.
+Domain-specific estimates can be obtained by supplying a factor variable or 0/1 numeric variable to `zcol`. For example, the following code estimates the mean of `psa_level` separately within BMI categories.
 
 ```{r multi-domain-psa}
 multi_psa_bmi <- pwmean(
@@ -169,7 +176,7 @@ print(multi_psa_bmi)
 
 The domain estimates use the same fitted pseudo-weights from `fit_multi`. The participation model is not refitted for each BMI category. Instead, `pwmean()` reuses the pseudo-weights and computes a separate pseudo-weighted mean within each domain. This is useful when the same adjustment model is intended to support several outcome or subgroup analyses.
 
-The same function can also be used when the outcome is categorical. In this case, `pwmean()` reports estimated prevalences for each category. The following example treats `diabetes` as a categorical outcome.
+The same function can also be used when the outcome is categorical. In this case, `pwmean()` reports estimated prevalence for each category. The following example treats `diabetes` as a categorical outcome.
 
 ```{r multi-categorical-outcome}
 multi_diabetes <- pwmean(fit_multi, y = "diabetes")
@@ -199,7 +206,7 @@ multi_psa_no_precali <- pwmean(fit_multi_no_precali, y = "psa_level")
 
 ## Optional: One-reference calibration as a special case
 
-A one-reference analysis can be viewed as a reduced version of the multi-reference analysis. The same basic components are still present: a nonprobability sample, a probability reference survey, a participation model, and a fitted pseudo-weight object. The difference is that all auxiliary information is from a single reference survey. As a result, there is no ordering of reference surveys, no cumulative precalibration, and no variables selection across different reference surveys.
+A one-reference analysis can be viewed as a special case of the multi-reference analysis. The same basic components are still present: a nonprobability sample, a probability reference survey, a participation model, and a fitted pseudo-weight object. The difference is that all auxiliary information is from a single reference survey. As a result, there is no ordering of reference surveys, no cumulative precalibration, and no variables selection across different reference surveys. **DO WE NEED TO EXPLAIN THE DIFFERENT METHODS AVAILABLE FOR ONE_REFERENCE CASE HERE?**
 
 ```{r one-ref-fit}
 fit_one <- est_pw(
@@ -224,7 +231,9 @@ pwmean(fit_one,y= "psa_level")
 
 ## Evaluation against the unweighted estimator
 
-The preceding results show that pseudo-weighting changes the PSA estimates in the expected direction. To quantify this improvement, this subsection compares the multi-reference pseudo-weighted estimator with the unweighted estimator from the nonprobability sample. The true finite population values, computed from the underlying finite population, are used as reference targets for the evulation.
+The preceding results show that pseudo-weighting changes the PSA estimates in the expected direction. To quantify this improvement, this subsection compares the multi-reference pseudo-weighted estimator with the unweighted estimator from the nonprobability sample. The true finite population values, computed from the underlying finite population, are used as reference targets for the evaluation.
+
+**DO WE NEED TO SHOW THREE DECIMAL PLACE? IS TWO ENOUGH?**
 
 ```{r estimator-comparison, echo=FALSE}
 true_psa_fp <- c(
