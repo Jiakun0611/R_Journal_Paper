@@ -1,0 +1,2160 @@
+---
+title: "nonprobsampling: An R Package for Inference from Nonprobability Samples Using Multiple Reference Surveys"
+date: "2026-07-11"
+abstract: >
+  We introduce nonprobsampling, an R package for finite population
+  inference from nonprobability samples using multiple probability
+  reference surveys. The package is built on the generalized estimating
+  equations framework of Landsman et al. (2026), where pseudo-weights for
+  the nonprobability sample are constructed by aligning its auxiliary
+  information with corresponding design-weighted information from
+  probability reference surveys. The primary method implemented is
+  multi-reference calibration, which enables the integration of auxiliary
+  information from multiple reference surveys when no single reference
+  survey contains all variables needed for the participation model.
+  One-reference methods, including raking ratio calibration, the adjusted
+  logistic propensity (ALP) method, and the Chen--Li--Wu (CLW) method, are
+  implemented as special cases of the same framework. We describe the
+  methodological foundations and package workflow, evaluate performance
+  through simulation under various sampling and covariate-coverage
+  scenarios, and illustrate the methods using example surveys demonstrating           multi-reference analyses.
+output:
+  rjtools::rjournal_article
+bibliography: article.bib
+header-includes:
+  - \fancyfoot{}
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  echo = TRUE,
+  error = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  fig.path = "figures/"
+)
+```
+
+# Introduction
+
+Probability surveys are widely regarded as the gold standard for finite
+population inference in survey research [@ElliottValliant2017;
+@CornesseEtAl2020]. Their sampling designs explicitly control how
+participants are selected, enabling valid generalization from the sample
+to the target population. In practice, however, probability surveys are
+often costly, time-consuming, and difficult to sustain over time
+[@Mindell2015]. As a result, researchers have increasingly turned to
+nonprobability samples collected through online platforms, clinical
+settings, volunteer panels, or other convenience-based recruitment
+channels [@BakerEtAl2013; @HaysEtAl2015]. Although these samples are
+easier and faster to collect, their underlying participation mechanisms
+are typically unknown. When participation is related to variables that
+also affect the outcome of interest, unadjusted estimates of population
+means or prevalence may be substantially biased [@Groves2006;
+@Bethlehem2010].
+
+A common strategy to correct for participation bias in the
+nonprobability sample is to integrate it with an external probability
+reference survey that share the same target population. Auxiliary
+variables observed in both data sources are then used to estimate
+participation probabilities in the nonprobability sample. The inverses
+of these estimated probabilities serve as pseudo-weights that function
+analogously to survey sampling weights in probability surveys. Several
+one-reference pseudo-weighing methods have been proposed, including the
+adjusted logistic propensity (ALP) method [@Wang2021], the CLW method
+[@Chen2020], and the raking ratio calibration method described in
+@Landsman2026.
+
+These methods are useful when a single probability reference survey
+contains all auxiliary variables needed for the participation model to
+estimate the pseudo-weights, but this requirement can be limiting in
+practice. Participation may depend on variables from different domains,
+such as demographic, health, occupational, or geographic
+characteristics, and a single reference survey may not capture all
+relevant variables. When relevant auxiliary variables are missing from
+the probability reference survey, the participation model may be
+misspecified, leading to biased pseudo-weighted estimates. The
+multi-reference calibration method addresses this limitation by
+integrating auxiliary information across multiple probability reference
+surveys, thereby alleviating the need for all participation-related
+variables to be observed within a single reference survey @Landsman2026.
+
+This paper introduces `nonprobsampling`, an R package for finite
+population inference from nonprobability samples using multiple
+probability reference surveys. The package is structured around the
+multi-reference calibration framework of @Landsman2026, which serves as
+both the main methodological basis and the core source of software
+functionality. Within this framework, the one-reference raking ratio
+calibration method, as well as the ALP and CLW methods, are implemented
+as special cases for comparison and reproducibility.
+
+The remainder of the paper is organized as follows. We first review the
+methodological background for pseudo-weight estimation with multiple
+probability reference surveys. We then describe the workflow and
+implementation details of `nonprobsampling`. Finally, we illustrate
+multi-reference analyses using the package's example datasets and
+discuss practical considerations for applied use.
+
+# Methodological Background
+
+This section outlines the methodological foundations underlying the
+computations implemented in `nonprobsampling`. The complete statistical
+framework, regularity conditions, and variance derivations are described
+in @Landsman2026. Here, we focus on the estimating equations framework
+that underlies the package, the construction of pseudo-weights from
+multiple probability reference surveys, and the special case of the
+one-reference method implemented within the package.
+
+## Nonprobability Samples and Pseudo-Weights
+
+Let $\mathrm{FP}$ denote a finite target population of size $N$. For
+each unit $i \in \mathrm{FP}$, let $y_i$ be the outcome of interest and
+let $\mathbf{x}_i$ be a vector of auxiliary variables for $i=1,...,N$.
+The target parameter is the finite population mean: $$\mu
+=
+\frac{1}{N}\sum_{i\in \mathrm{FP}} y_i .$$ When $y_i$ is binary, $\mu$
+corresponds to a finite population prevalence.
+
+Suppose that a nonprobability sample $s_c$ is obtained from
+$\mathrm{FP}$. Let $\delta_i^c$ be the indicator that unit $i$ is
+included in the nonprobability sample, and define the participation
+probability as $$\pi_i^c
+=
+\Pr(\delta_i^c=1 \mid i\in \mathrm{FP}) .$$ Unlike a probability survey,
+a nonprobability sample is not generated under a known sampling design.
+Therefore, the participation probabilities $\pi_i^c$ are unknown. If
+they were known, a standard Hájek estimator of $\mu$ is given by
+$$\hat{\mu}
+=
+\frac{
+\sum_{i\in s_c} y_i / \pi_i^c
+}{
+\sum_{i\in s_c} 1 / \pi_i^c
+}.$$ The inverse participation probability $1/\pi_i^c$ plays the role of
+a weight for unit $i$ in the nonprobability sample. Since $\pi_i^c$ is
+unknown in practice, `nonprobsampling` estimates this quantity using
+auxiliary information from one or multiple probability reference
+surveys. The inverse of the estimated participation probabilities are
+referred to as pseudo-weights.
+
+The validity of pseudo-weights depends on assumptions about the
+participation mechanism. A key assumption is that, conditional on the
+auxiliary variables included in the participation model, participation
+in the nonprobability sample is independent of the outcome:
+$$\Pr(\delta_i^c=1 \mid y_i,\mathbf{x}_i)
+=
+\Pr(\delta_i^c=1 \mid \mathbf{x}_i).$$ This assumption implies that the
+auxiliary variables $\mathbf{x}_i$ should explain both participation in
+the nonprobability sample and the variation in the outcome $y_i$. A
+positivity condition is also required: $$\pi_i^c > 0
+\quad
+\text{for all } i\in \mathrm{FP}.$$ Thus, every unit in the finite
+population is assumed to have a nonzero probability of participating in
+the nonprobability sample. Under these assumptions, pseudo-weights can
+be used to reduce participation bias and to estimate FP means from the
+nonprobability sample.
+
+## Generalized Estimating Equations Framework
+
+Let $s_{p_1},\ldots,s_{p_K}$ denote $K \geq 1$ probability reference
+surveys sampled from the same finite population. For reference survey
+$s_{p_k}$, let $\delta_i^{(p_k)}$ be the indicator that unit $i$ is
+included in the survey, and let $$d_i^{(p_k)}
+=
+\frac{1}{\pi_i^{(p_k)}}$$ be the known survey weight, where
+$\pi_i^{(p_k)}$ is the survey inclusion probability.
+
+Each reference survey may contain only a subset of the auxiliary
+information required for the participation model. Let
+$\mathbf{x}_i^{(p_k)}$ denote the auxiliary variables contributed by
+reference survey $s_{p_k}$, and let $\mathbf{x}_i$ denote the full
+auxiliary vector obtained by stacking the components contributed across
+all reference surveys so that the conditional independence assumption
+holds. The core estimating equations framework is given by:
+
+\begin{equation}
+\left\{
+\begin{aligned}
+N^{-1}\sum_{i\in \mathrm{FP}}
+\delta_i^c
+w(\mathbf{x}_i,\boldsymbol{\beta})
+h(\mathbf{x}_i^{(p_1)},\boldsymbol{\beta})
+-
+N^{-1}\sum_{i\in \mathrm{FP}}
+\delta_i^{(p_1)}
+d_i^{(p_1)}
+h(\mathbf{x}_i^{(p_1)},\boldsymbol{\beta})
+&=
+\mathbf{0},
+\\
+&\vdots
+\\
+N^{-1}\sum_{i\in \mathrm{FP}}
+\delta_i^c
+w(\mathbf{x}_i,\boldsymbol{\beta})
+h(\mathbf{x}_i^{(p_K)},\boldsymbol{\beta})
+-
+N^{-1}\sum_{i\in \mathrm{FP}}
+\delta_i^{(p_K)}
+d_i^{(p_K)}
+h(\mathbf{x}_i^{(p_K)},\boldsymbol{\beta})
+&=
+\mathbf{0}.
+\end{aligned}
+\right.
+(\#eq:gee-multi)
+\end{equation}
+
+Here, $w(\mathbf{x}_i,\boldsymbol{\beta})$ is a weight function,
+$h(\cdot)$ is a vector-valued estimating function, and
+$\boldsymbol{\beta}$ is a nuisance parameter vector. In each equation,
+the difference between the weighted auxiliary information from the
+nonprobability sample and the corresponding design-weighted auxiliary
+information from one probability reference survey is set to zero.
+Solving this system of equations yields $\hat{\boldsymbol{\beta}}$,
+which determines the pseudo-weights for the nonprobability sample
+through $$\hat{w}_i
+=
+w(\mathbf{x}_i,\hat{\boldsymbol{\beta}}),
+\qquad i\in s_c.$$ The pseudo-weighted estimator of the finite
+population mean is then given by \begin{equation}
+\hat{\mu}(\hat{\boldsymbol{\beta}})
+=
+\frac{
+\sum_{i \in s_c}
+\hat{w}(\mathbf{x}_i,\hat{\boldsymbol{\beta}})y_i
+}{
+\sum_{i \in s_c}
+\hat{w}(\mathbf{x}_i,\hat{\boldsymbol{\beta}})
+}.
+(\#eq:pseudo-weighted-mean)
+\end{equation}
+
+## Multi-Reference Calibration Method
+
+The main method implemented by `nonprobsampling` is the multi-reference
+raking ratio calibration method of @Landsman2026. This method is used
+when $K>1$ probability reference surveys are supplied. It is tailored
+for situations in which no individual reference survey includes all
+auxiliary variables required for the participation model, but the union
+of the multiple reference surveys does.
+
+The multi-reference calibration method is defined by substituting the
+following choices of the weight function and estimating function into
+Equation \@ref(eq:gee-multi): $$w(\mathbf{x}_i,\boldsymbol{\beta})
+=
+\exp(-\boldsymbol{\beta}^{\top}\mathbf{x}_i),
+\qquad
+h(\mathbf{x}_i^{(p_k)},\boldsymbol{\beta})
+=
+\mathbf{x}_i^{(p_k)},
+\quad k=1,\ldots,K.$$ With these choices, the estimating equation system
+aligns the pseudo-weighted auxiliary totals from the nonprobability
+sample with the corresponding design-weighted auxiliary totals from
+probability reference surveys. Solving this system gives the parameter
+estimate $\hat{\boldsymbol{\beta}}_{\mathrm{cal}}$, which determines the
+final multi-reference calibration pseudo-weights.
+
+### Cumulative Precalibration *(Variable Selection and Cumulative Precalibration)*
+
+When multiple probability reference surveys are used, the same auxiliary
+variable may appear in more than one reference survey. This overlap
+requires special handling before pseudo-weight estimation. First, each
+auxiliary variable should contribute only one design-weighted total in
+the estimation equations framework. Therefore, overlapping variables
+must be properly selected from reference surveys. Second, variables that
+are not selected from a particular reference survey may still carry
+useful information through their relationships with variables that are
+unique to that survey. Cumulative precalibration is used to preserve
+this information.
+
+In `nonprobsampling`, two ordering rules are available for selecting
+overlapping auxiliary variables. The first orders reference surveys by
+sample size, from largest to smallest, so that overlapping variables are
+preferentially taken from the larger survey. This is the ordering rule
+described in @Landsman2026. The rationale is that larger probability
+reference surveys are generally expected to provide more informative
+weighted totals and are therefore treated as more reliable reference
+sources. Under this rule, the largest survey is processed first and
+provides the estimate of the finite population size and the weighted
+totals for overlapping auxiliary variables.
+
+The second rule follows the order specified by the user. This option is
+useful when sample size alone does not determine the preference of
+auxiliary information sources. For example, a smaller survey may be
+considered more relevant to the target population, may use more
+compatible variable definitions, or may be regarded as more reliable for
+a particular application. Under this rule, the user should place the
+most important reference survey first, since the estimated population
+size and the weighted totals for overlapping variables are taken from
+that survey. The next most important survey should be placed second, and
+so on.
+
+For example, suppose $K=2$ and the auxiliary variables are $x_1$, $x_2$,
+and $x_3$. Suppose that $s_{p_2}$ contains $x_1$ and $x_2$, while
+$s_{p_1}$ contains $x_1$ and $x_3$. If $s_{p_2}$ is processed first, the
+overlapping variable $x_1$ is assigned to $s_{p_2}$.The assigned vectors
+are
+then$$ \mathbf{x}_i^{(p_2)}=(1,x_{i1},x_{i2})^\top, \qquad \mathbf{x}_i^{(p_1)}=x_{i3}. $$
+
+The full auxiliary vector in the participation model is formed by
+stacking these assigned vectors.
+
+Cumulative precalibration is a sequential procedure for adjusting the
+survey weights of later reference surveys before the multi-reference
+calibration step. The reference surveys are first ordered according to
+the ordering rule discussed above, specified by `sp_order` in the
+package. The first survey provides the initial target totals, including
+the estimated finite population size and the weighted totals of its
+auxiliary variables. Each later survey is then calibrated to the current
+targets for overlapping auxiliary variables that are included in the
+participation model, as well as to the current estimate of the finite
+population size. If there are no overlapping auxiliary variables, only
+the sum of weights is calibrated, so that the reference surveys
+correspond to the same estimated finite population size. After this
+step, the calibrated weights from the current survey are used to
+estimate totals for auxiliary variables not yet included in the target
+vector. These new totals are appended to the target vector before the
+next survey is processed. After all reference surveys have been
+processed, the accumulated target vector contains auxiliary totals from
+all reference surveys and is used in the subsequent multi-reference
+calibration step to estimate pseudo-weights for the nonprobability
+sample.
+
+Returning to the two-survey example, $x_1$ is assigned to $s_{p_2}$,
+while $x_3$ is assigned to $s_{p_1}$. Although $x_1$ from $s_{p_1}$ is
+not included directly in the final calibration system, it may contain
+useful information through its relationship to $x_3$ within $s_{p_1}$.
+Cumulative precalibration adjusts the weights of $s_{p_1}$ so that the
+weighted total of $x_1$ and the total survey weight match the
+corresponding totals from $s_{p_2}$. The adjusted weights for $s_{p_1}$
+are then used when estimating the design-weighted total of $x_3$.
+
+*For example, suppose age is observed in both reference surveys, a
+health variable is observed only in the first survey, and an employment
+variable is observed only in the second survey. If age is taken from the
+first survey in the final calibration equations, the age variable from
+the second survey is not directly included again. By calibrating the
+second survey weights to match the age totals from the first survey
+before the pseudo-weight estimation step, cumulative precalibration
+allows the employment variable to contribute information that remains
+aligned with the common age distribution.*
+
+Cumulative precalibration in `nonprobsampling` is based on the
+overlapping variables included in `p_formula`, not on all overlapping
+variables in the raw data. This design keeps the procedure tied to the
+specified participation model and avoids removing observations because
+of missing values in variables that are not used for pseudo-weight
+estimation.
+
+## One-Reference Special Cases
+
+When $K=1$, Equation \@ref(eq:gee-multi) simplifies to a single
+estimating equation:\begin{equation}
+N^{-1}\sum_{i\in \mathrm{FP}}
+\delta_i^c
+w(\mathbf{x}_i,\boldsymbol{\beta})
+h(\mathbf{x}_i,\boldsymbol{\beta})
+-
+N^{-1}\sum_{i\in \mathrm{FP}}
+\delta_i^p
+d_i
+h(\mathbf{x}_i,\boldsymbol{\beta})
+=
+\mathbf{0}.
+(\#eq:one-ref-gee)
+\end{equation} The `nonprobsampling` package implements three choices of
+$w(\mathbf{x}_i,\boldsymbol{\beta})$ and
+$h(\mathbf{x}_i,\boldsymbol{\beta})$ corresponding to raking raio
+calibration method, the adjusted logistic propensity (ALP) method, and
+the Chen--Li--Wu (CLW) method.
+
+The one-reference **raking ratio calibration** estimator is obtained by
+setting $$w(\mathbf{x}_i,\boldsymbol{\beta})
+=
+\exp(-\boldsymbol{\beta}^{\top}\mathbf{x}_i),
+\qquad
+h(\mathbf{x}_i,\boldsymbol{\beta})
+=
+\mathbf{x}_i .$$ This corresponds to the special case of the
+multi-reference calibration method with a single probability reference
+survey.
+
+The **ALP** method is defined by $$w(\mathbf{x}_i,\boldsymbol{\beta})
+=
+\exp(-\boldsymbol{\beta}^{\top}\mathbf{x}_i),
+\qquad
+h(\mathbf{x}_i,\boldsymbol{\beta})
+=
+\{1+w(\mathbf{x}_i,\boldsymbol{\beta})\}^{-1}
+\mathbf{x}_i .$$
+
+The **CLW** method is defined by $$w(\mathbf{x}_i,\boldsymbol{\beta})
+=
+1+\exp(-\boldsymbol{\beta}^{\top}\mathbf{x}_i),
+\qquad
+h(\mathbf{x}_i,\boldsymbol{\beta})
+=
+\{w(\mathbf{x}_i,\boldsymbol{\beta})\}^{-1}
+\mathbf{x}_i .$$
+
+Thus, the one-reference methods are special cases of Equation
+\@ref(eq:gee-multi) with $K=1$ and method-specific choices of $w(\cdot)$
+and $h(\cdot)$.
+
+## Variance Estimation
+
+Let $z_i$ be a domain indicator, where $z_i=1$ for units in the domain
+and $z_i=0$ otherwise. The overall mean is obtained as the special case
+where $z_i=1$ for all units in the nonprobability sample. The
+pseudo-weighted domain mean estimator is $$\hat{\mu}_z
+=
+\frac{
+\sum_{i\in s_c}
+\hat{w}_i z_i y_i
+}{
+\sum_{i\in s_c}
+\hat{w}_i z_i
+}.$$
+
+Variance estimation in `nonprobsampling` is based on the Taylor
+linearization approach described in @Landsman2026. The variance
+estimator accounts for variation from the nonprobability sample,
+uncertainty from estimating $\boldsymbol{\beta}$, and sampling variation
+in the probability reference survey or surveys.
+
+For the raking ratio calibration estimator with $K$ reference surveys,
+the Taylor-linearized variance estimator can be written as
+$$\widehat{\mathbb{V}}
+\{\hat{\mu}(\hat{\boldsymbol{\beta}}_{\mathrm{cal}})\}
+=
+T_2^{-2}
+\left[
+\sum_{i\in s_c}
+w(\mathbf{x}_i,\hat{\boldsymbol{\beta}})
+\{w(\mathbf{x}_i,\hat{\boldsymbol{\beta}})-1\}
+(y_i z_i-\hat{\mu}z_i-\hat{\mathbf{b}}^\top \mathbf{x}_i)^2
++
+\hat{\mathbf{b}}^\top \widehat{\mathbf{D}}\hat{\mathbf{b}}
+\right],$$ where $$T_2
+=
+\sum_{i\in s_c}
+w(\mathbf{x}_i,\hat{\boldsymbol{\beta}})z_i,$$
+
+$$\hat{\mathbf{b}}^\top
+=
+\left[
+\sum_{i\in s_c}
+w(\mathbf{x}_i,\hat{\boldsymbol{\beta}})
+z_i
+(y_i-\hat{\mu})
+\mathbf{x}_i^\top
+\right]
+\left[
+\sum_{i\in s_c}
+w(\mathbf{x}_i,\hat{\boldsymbol{\beta}})
+\mathbf{x}_i\mathbf{x}_i^\top
+\right]^{-1},$$ and $$\widehat{\mathbf{D}}
+=
+\operatorname{blockdiag}
+\left(
+\widehat{\mathbf{D}}_1,\ldots,\widehat{\mathbf{D}}_K
+\right),
+\qquad
+\widehat{\mathbf{D}}_k
+=
+\widehat{\mathbb{V}}_{p_k}
+\left(
+\sum_{i\in s_{p_k}}
+d_i^{(p_k)}
+\mathbf{x}_i^{(p_k)}
+\right).$$
+
+Here, $\widehat{\mathbf{D}}_k$ denotes the estimated variance-covariance
+matrix of the design-weighted auxiliary-variable totals from reference
+survey $s_{p_k}$, computed under its probability sampling design. With
+multiple reference surveys, these design-based variance-covariance
+matrices are combined into the block-diagonal matrix
+$\widehat{\mathbf{D}}$. When $K=1$, this construction reduces to the
+one-reference case, where $\widehat{\mathbf{D}}=\widehat{\mathbf{D}}_1$.
+
+The first term inside the brackets represents the nonprobability sample
+component, evaluated under a Poisson sampling approximation. The second
+term, $\hat{\mathbf{b}}^\top \widehat{\mathbf{D}}\hat{\mathbf{b}}$,
+captures sampling variation in the auxiliary-variable totals estimated
+from the probability reference survey or surveys. In the package, users
+provide reference surveys as survey design objects, and the design
+information stored in these objects is used to compute
+$\widehat{\mathbf{D}}_k$.
+
+# The R package
+
+The `nonprobsampling` package provides tools for finite population
+inference from a nonprobability sample using auxiliary information from
+probability reference survey(s). The package implements pseudo-weighing
+methods based on the generalized estimating equations framework
+described in the Method section. Its main purpose is to help users
+estimate pseudo-weights for units in a nonprobability sample and then
+use those pseudo-weights to estimate population means (prevalence) and
+their corresponding standard errors.
+
+The package is designed for settings in which the outcome of interest is
+observed in the nonprobability sample, while auxiliary variables related
+to participation are available in the nonprobability sample and in one
+or multiple probability reference surveys. The main functionality of
+`nonprobsampling` is multi-reference calibration, which supports
+pseudo-weight estimation when auxiliary variables are distributed across
+multiple reference surveys. One-reference methods are implemented as
+special cases in this framework, including the raking ratio calibration
+method of @Landsman2026, the adjusted logistic propensity (ALP) method
+of @Wang2021, and the Chen--Li--Wu (CLW) method of @Chen2020.
+
+## Package design
+
+### Design goals and intended users
+
+The package was developed with applied researchers, survey
+statisticians, epidemiologists, social scientists, and data analysts in
+mind, particularly those seeking to make inferences from nonprobability
+samples. The intended user is expected to be familiar with data frames,
+model formulas, and basic survey-weighted analysis in R, but not
+necessarily with the internal estimating equations behind the
+implemented methods.
+
+The design has three main goals. First, the package provides a direct
+workflow from input data to pseudo-weighted estimates. Users do not need
+to manually construct estimating equations, compute calibration totals,
+or derive variance components. Second, the package integrates existing
+survey analysis tools in R from the `survey` package. Reference surveys
+are supplied as `survey` design objects rather than as plain data
+frames, allowing users to retain survey design information without
+manually extracting it. Third, the package is designed for realistic
+practical settings in which auxiliary information related to
+participation is distributed across multiple reference surveys, while
+still supporting the conventional setting in which variables needed for
+the participation model are only available from a single reference
+survey.
+
+### Integration with the `survey` package
+
+The package relies on the `survey` package to represent probability
+reference surveys. This design avoids introducing a new representation
+for complex survey designs and allows users to work with familiar
+`survey` objects. Reference surveys can be created using
+`survey::svydesign()` when the survey design is represented by primary
+sampling units, strata, and weights. They can also be created using
+`survey::svrepdesign()` when replicate weights are provided.
+
+This integration is important for variance estimation as the uncertainty
+of pseudo-weighted mean partially depends on the sampling designs of the
+reference surveys. By requiring reference surveys to be supplied as
+`survey` design objects, `nonprobsampling` can use the design
+information retained in those objects directly. This makes the interface
+consistent with standard survey analysis in R and reduces the risk that
+users accidentally discard design information when preparing reference
+surveys.
+
+### Input objects, formula interface, and workflow
+
+The package workflow is organized around a two-stage design. First,
+`est_pw()` estimates pseudo-weights by fitting the participation model
+with auxiliary information from the nonprobability sample and multiple
+probability reference surveys. Second, `pwmean()` uses the fitted
+pseudo-weight object to estimate pseudo-weighted means (prevalence) and
+their corresponding standard errors for specified outcomes. This
+separation reflects both the statistical structure of the methods and
+the intended software workflow: the participation model is fitted once
+to construct pseudo-weights, and the resulting object can then be reused
+for different outcomes or domains without refitting the model.
+
+The data sources are supplied to `est_pw()` through the `data` argument,
+which must be a list. The first element must be the nonprobability
+sample, supplied as a data frame. The remaining elements must be
+probability reference surveys represented as survey design objects
+created with the `survey` package. Thus, an analysis with two reference
+surveys has the form
+
+``` r
+data = list(sc, ref1_design, ref2_design)
+```
+
+where `sc` is the nonprobability sample and `ref1_design` and
+`ref2_design` are survey design objects.
+
+The participation model is specified through the argument `p_formula`.
+With multiple reference surveys, `p_formula` is a list of one-sided
+formulas, with one formula corresponding to each reference survey. For
+example,
+
+``` r
+p_formula = list(
+~ agecat + race + education + pros_enlarged,
+~ agecat + race + BMI + diabetes
+)
+```
+
+specifies that the first reference survey contributes information on
+`agecat`, `race`, `education`, and `pros_enlarged`, whereas the second
+reference survey contributes information on `agecat`, `race`, `BMI`, and
+`diabetes`. The first formula corresponds to the first reference survey
+design object after `sc`, the second formula corresponds to the second
+reference survey design object, and so on.
+
+A typical multi-reference workflow call has the following form:
+
+``` r
+fit_multi <- est_pw(
+data = list(sc, ref1_design, ref2_design),
+p_formula = list(
+~ agecat + race + education + pros_enlarged,
+~ agecat + race + BMI + diabetes
+),
+method   = "multi",
+sp_order = "size",
+precali  = TRUE
+)
+
+est_multi <- pwmean(fit_multi, y = "psa_level")
+```
+
+In this example, `education` and `pros_enlarged` are contributed by the
+first reference survey, whereas `BMI` and `diabetes` are contributed by
+the second reference survey. The variables `agecat` and `race` appear in
+both formulas and are therefore treated as overlapping auxiliary
+variables. The handling of overlapping variables follows the procedure
+discussed in the Cumulative Precalibration section.
+
+The argument `sp_order` controls how multiple reference surveys are
+ordered. With `sp_order = "size"`, reference surveys are ordered by
+sample size, from largest to smallest. With `sp_order = "given"`, they
+are processed in the order supplied by the user. The argument `precali`
+controls whether cumulative precalibration is applied before the main
+multi-reference calibration step. When `precali = TRUE`, which is the
+default, overlapping variables specified in `p_formula` are used to
+align weighted totals across reference surveys before the pseudo-weights
+estimation step.
+
+The one-reference workflow is a special case of the same interface. When
+only one probability reference survey is supplied, the user provides the
+nonprobability sample and one survey design object in `data`, and
+`p_formula` is a single one-sided formula rather than a list of
+formulas.
+
+``` r
+fit_one <- est_pw(
+data      = list(sc, ref1_design),
+p_formula = ~ agecat + race + education + BMI,
+method    = "calibration"
+)
+
+est_one <- pwmean(fit_one, y = "psa_level")
+```
+
+This workflow is useful when a single probability reference survey
+contains all auxiliary variables included in the participation model.
+Users may choose the raking ratio calibration method, the ALP method, or
+the CLW method by changing the `method` argument.
+
+After pseudo-weights have been estimated, `pwmean()` provides a common
+outcome-estimation interface. For continuous outcomes, `pwmean()`
+estimates a population mean. For binary 0/1 outcomes supplied as
+numeric, the same mean estimator corresponds to a prevalence. For
+categorical outcomes supplied as a factor, the function returns
+prevalence estimates for each observed category. All estimates are
+returned with corresponding standard errors and 95% confidence
+intervals.
+
+``` r
+mean_est <- pwmean(fit_multi, y = "psa_level")
+
+prev_est <- pwmean(fit_multi, y = "BMI")
+```
+
+Domain-specific estimates can be obtained by passing a categorical
+domain variable supplied as a factor or 0/1 binary to `zcol`. In this
+case, `pwmean()` computes the pseudo-weighted estimate separately within
+each BMI subgroup.
+
+``` r
+domain_est <- pwmean(
+fit_multi,
+y    = "psa_level",
+zcol = "BMI"
+)
+```
+
+The same fitted pseudo-weights are reused across these calls. Users do
+not need to refit the participation model for each outcome or domain.
+This is useful in applied analyses where several outcomes are studied
+using the same set of auxiliary variables for participation adjustment.
+The fitted `"pw_fit"` object stores the method-specific quantities
+needed for point and variance estimation, so users do not need to pass
+the reference surveys again when calling `pwmean()`.
+
+If `p_formula = NULL`, the package constructs a default participation
+model based on variables shared by name between the nonprobability
+sample and each reference survey. This default is useful for exploratory
+analyses and examples, but in applied work we recommend explicitly
+specifying `p_formula`. Explicit formulas make the analysis reproducible
+and allow the user to decide which auxiliary variables are plausible
+determinants of participation.
+
+If `method = NULL`, `est_pw()` selects the pseudo-weighting method
+automatically based on the number of reference surveys supplied. When
+multiple reference surveys are provided, it uses `"multi"` for the
+multi-reference calibration method. When a single reference survey is
+provided, it uses `"calibration"` for the one-reference calibration
+method. These defaults correspond to the methods evaluated most
+favorably in the simulation study of Landsman et al. (2026) and are
+recommended for general use, while users can still explicitly specify
+any other supported method when needed.
+
+### Output objects and S3 methods
+
+The function `est_pw()` returns an object of class `"pw_fit"`. This
+object contains both user-facing results and internal quantities needed
+by `pwmean()`. Important components include the estimated
+pseudo-weights, the updated nonprobability sample with a pseudo-weight
+column, estimated participation model coefficients, solver diagnostics,
+and missing-data information.
+
+The updated nonprobability sample is stored in the component
+`sc_updated`. By default, the pseudo-weight column added to this data
+frame is named `pseudo_wts`, and users can change this name through the
+`sc_wname` argument. The estimated pseudo-weights are also stored
+separately as a numeric vector in the component `pseudo_weights`. Solver
+information is stored in `solver_diagnostics`, including the solver
+name, termination code, solver message, number of iterations, and the
+maximum absolute estimating equations value at convergence.
+
+The function `pwmean()` returns an object of class `"pwmean"` for
+numeric and binary outcomes. For categorical outcomes, it returns an
+object of class `"pwmean_factor"`, which returns category-specific
+prevalence estimates. The main component is `estimates`, a data frame
+containing the unweighted and pseudo-weighted estimates, their standard
+errors, and 95% confidence intervals. For numeric outcomes, the estimate
+is a mean. For binary 0/1 outcomes, the estimate corresponds to
+prevalence. For categorical outcomes, each category is internally
+converted into an indicator, and the function returns prevalence
+estimate for each observed category.
+
+The package provides S3 methods for printing and summarizing fitted
+objects. The `print()` method for `"pw_fit"` objects gives a compact
+overview of the fitted pseudo-weight object, including the method,
+participation model size, convergence status, and pseudo-weight summary.
+The `summary()` method provides more detailed output, including
+coefficients and solver diagnostics. The `print()` and `summary()`
+methods for `"pwmean"` and `"pwmean_factor"` objects display the
+unweighted and pseudo-weighted estimates, standard errors, and
+confidence intervals. The package also provides `na.action()` methods to
+retrieve missing data information of objects returned by `est_pw()` and
+`pwmean()`.
+
+## Practical considerations
+
+### Variable harmonization
+
+Variable harmonization is required before using `est_pw()`. The package
+matches variables by name, not by meaning. Therefore, a variable called
+`agecat` in the nonprobability sample and `age_group` in a reference
+survey will not be treated as the same variable unless the user renames
+one of them. Similarly, factor levels must be compatible across data
+sources. Users should harmonize shared variables so that they have the
+same names, compatible categories, and the same definitions.
+
+Harmonization is especially important in multi-reference analyses. Some
+variables may appear in multiple reference surveys, while others appear
+in only one. The user should decide which variables are comparable and
+whether differences in survey timing, question wording, or target
+population definitions are acceptable. The package checks variable
+availability and factor compatibility, but it cannot determine whether
+two variables have the same definition.
+
+Continuous variables should also be harmonized. For example, income
+measured in dollars in one survey and thousands of dollars in another
+survey should be rescaled before estimation. Similarly, biomarkers,
+durations, or expenditure variables should use comparable units. If the
+scale of a continuous auxiliary variable differs across data sources,
+the fitted participation model and resulting pseudo-weights may be
+misleading.
+
+### Missing data handling
+
+The package handles missing data in two stages. The first stage occurs
+in `est_pw()` and applies to variables used in the participation model.
+The second stage occurs in `pwmean()` and applies to the outcome
+variable and, if supplied, the domain variable.
+
+By default, `est_pw()` uses `na.action = stats::na.omit`. Rows with
+missing values in the participation model variables are removed before
+pseudo-weights are estimated, so these rows are not included in either
+the `sc_updated` data frame or the `pseudo_weights` vector of the
+returned `"pw_fit"` object. Information about the omitted rows is
+recorded in the fitted object and can be inspected through the summary
+output or by calling `na.action()` on the fitted object.
+
+Alternatively, users may use `na.action = stats::na.exclude`. In this
+case, observations in the nonprobability sample that are excluded from
+pseudo-weight estimation remain in the returned `sc_updated` data frame,
+but their pseudo-weight values are recorded as `NA`. This option is
+useful when users want to preserve row alignment with the original
+nonprobability sample for later merging, checking, or imputation.
+
+After pseudo-weights have been estimated, `pwmean()` applies
+missing-data handling separately to the outcome variable and, if
+supplied, the domain variable specified by `zcol`. By default,
+`pwmean()` uses `na.action = stats::na.omit`, so observations with
+missing outcome or domain values are excluded from that specific outcome
+analysis. This separate handling reflects the two-stage workflow:
+missing participation model variables affect only pseudo-weight
+estimation, while missing outcome or domain values affect only the
+outcome-specific estimation.
+
+### Solver control and diagnostics
+
+Pseudo-weight estimation requires solving estimating equations. The
+function `pw_solver_control()` creates a control object for this
+numerical step. The default solver is `"nleqslv"`, and users can modify
+convergence tolerances, the maximum number of iterations, tracing
+behavior, and solver-specific options.
+
+For most applications, the default settings are sufficient. However,
+convergence can be more difficult to reach when the participation model
+contains many parameters, sparse factor levels, strong collinearity, or
+auxiliary variables with limited overlap across data sources. In such
+cases, users may adjust the solver controls:
+
+``` r
+ctrl <- pw_solver_control(
+method = "Broyden",
+xtol   = 1e-10,
+ftol   = 1e-6,
+maxit  = 100,
+trace  = TRUE
+)
+```
+
+The fitted object stores solver diagnostics. Users should inspect the
+termination message, the number of iterations, and the final maximum
+absolute value of the estimating equations. Nonconvergence may indicate
+that the participation model is too complex for the available data, that
+factor levels are sparse, or that the nonprobability sample and
+reference survey have poor overlap in the auxiliary-variable space. In
+such situations, users should consider simplifying the participation
+model, combining sparse categories, checking variable harmonization, or
+evaluating whether the reference survey is appropriate for the target
+population.
+
+### Replicate-weight reference surveys
+
+Some probability reference surveys provide replicate weights rather than
+primary sampling unit and stratum identifiers. The package supports this
+workflow through `survey::svrepdesign()`. A replicate-weight survey
+design object can be supplied to `est_pw()` in the same way as a
+standard survey design object.
+
+This design allows the package to use replicate-weight information
+supplied by survey data providers. In applied work, users should use the
+replicate weights and replicate-weight type described in the
+documentation for the reference survey. A worked example using the
+package data is provided in Illustration section
+
+## Implementation details
+
+### Dependencies
+
+The package imports a small set of dependencies, keeping installation
+lightweight and making the package easy to use in applied environments.
+The `survey` package is used to represent and process probability
+reference surveys. This allows users who already analyze probability
+surveys with `survey` to incorporate `nonprobsampling` into their
+existing workflow. The `nleqslv` package is used to solve the nonlinear
+estimating equations for pseudo-weight estimation. Functions from
+`stats` are used for formula handling, model matrix construction,
+missing-data handling, and related base statistical operations. The
+package also uses `utils` for standard utility functions.
+
+### Variance estimation
+
+The package reports standard errors and confidence intervals for
+pseudo-weighted estimates. Analytic variance estimation is based on
+Taylor linearization and accounts for uncertainty from pseudo-weight
+estimation as well as the sampling designs of the probability reference
+surveys. For reference surveys represented by survey design objects, the
+design information is taken from the survey design object. The variance
+estimator depends on the method-specific quantities saved during
+pseudo-weight estimation. This is why `pwmean()` takes the fitted object
+as its argument rather than taking pseudo-weights alone.
+
+### Computational considerations
+
+The computational cost of `est_pw()` is determined primarily by the
+numbers of observations in the nonprobability sample and reference
+surveys, the number of reference surveys, the dimensions of the expanded
+participation model matrices, and the number of iterations required by
+the nonlinear equation solver. Categorical variables with many levels,
+interaction terms, and polynomial terms can substantially increase the
+model-matrix columns the participation model parameters. Because
+est_pw() repeatedly evaluates the estimating equations and their
+Jacobian matrices, increases in model-matrix columns can substantially
+increase both computation time and memory use. Large or poorly
+conditioned model matrices may also result in rank deficiency, numerical
+instability, or slower convergence.
+
+The reference survey designs contribute additional computational cost
+because `est_pw()`calculates design-based covariance matrices for the
+quantities required in subsequent variance estimation. This cost depends
+on the sample sizes, the numbers of model-matrix columns, and the survey
+design representations; replicate-weight designs may be particularly
+demanding when they contain many replicate weights. In multi-reference
+analyses, model matrices, survey-weighted totals, and design-based
+covariance blocks are constructed for every reference survey. When
+`precali = TRUE`, which is the default, the reference survey weights are
+also recalibrated sequentially before pseudo-weight estimation. The cost
+of this cumulative precalibration increases with the number and size of
+the reference surveys and the number of shared auxiliary variables.
+
+The current implementation uses in-memory R objects and dense model
+matrices and is therefore intended primarily for typical applied
+survey-analysis settings. Very large samples or high-dimensional
+participation models may require substantial memory and computation. For
+such analyses, users should inspect the expanded model-matrix
+dimensions, retain substantively important variables, combine sparse
+factor levels, and avoid unnecessary interaction or polynomial terms
+before fitting. Solver diagnostics should be examined after fitting to
+assess convergence.
+
+## Related R packages
+
+Several R packages support inference from nonprobability samples. The
+closest packages to `nonprobsampling` are `NonProbEst` and `nonprobsvy`.
+All three packages address finite population inference from
+nonprobability samples by using auxiliary information from external
+sources to reduce participation bias. However, they differ in
+methodological scope, interface design, and support for analyses using
+multiple reference surveys. Table \@ref(tab:related-packages) summarizes
+the main differences between the three packages.
+
+```{r related-packages, echo=FALSE}
+related_packages <- data.frame(
+  Feature = c(
+    "Number of reference surveys",
+    "Cumulative precalibration",
+    "Outcome types",
+    "Estimation scope",
+    "Survey design integration",
+    "Variance estimation method",
+    "Core methods",
+    "User workflow",
+    "Main focus"
+  ),
+  nonprobsampling = c(
+    "Multiple or one",
+    "Supported for aligning reference surveys",
+    "Continuous, binary, and categorical",
+    "Overall and domain-specific",
+    "PSU-based and replicate-weight survey designs",
+    "Analytical",
+    "Multi-reference calibration; raking-ratio calibration; ALP; CLW",
+    "est_pw() followed by pwmean()",
+    "Pseudo-weighted estimation using multiple reference surveys"
+  ),
+  nonprobsvy = c(
+    "One",
+    "Not available",
+    "Continuous and binary",
+    "Overall",
+    "PSU-based survey designs",
+    "Analytical and resampling-based",
+    "IPW; calibrated IPW; mass imputation; doubly robust estimation",
+    "nonprob()",
+    "General nonprobability sample inference"
+  ),
+  NonProbEst = c(
+    "One",
+    "Not available",
+    "Continuous and binary",
+    "Overall",
+    "No support",
+    "Resampling-based",
+    "Calibration; PSA; matching; model-based, model-assisted, and model-calibrated estimation",
+    "Method-specific functions",
+    "Several estimators for nonprobability samples"
+  ),
+  check.names = FALSE
+)
+
+related_packages_output <- knitr::kable(
+  related_packages,
+  format = if (knitr::is_latex_output()) "latex" else "html",
+  caption = paste(
+    "Comparison of nonprobsampling with related R packages for",
+    "nonprobability sample inference."
+  ),
+  booktabs = TRUE,
+  align = c("l", "l", "l", "l")
+)
+
+if (knitr::is_latex_output()) {
+  related_packages_output <- kableExtra::column_spec(
+    related_packages_output,
+    column = 1,
+    width = "3.3cm"
+  )
+  related_packages_output <- kableExtra::column_spec(
+    related_packages_output,
+    column = 2:4,
+    width = "3.9cm"
+  )
+  related_packages_output <- kableExtra::row_spec(
+    related_packages_output,
+    row = 1:9,
+    extra_latex_after = "\\addlinespace[2pt]"
+  )
+  kableExtra::kable_styling(
+    related_packages_output,
+    latex_options = "hold_position",
+    font_size = 10
+  )
+} else {
+  kableExtra::kable_styling(
+    related_packages_output,
+    bootstrap_options = c("striped", "condensed", "responsive"),
+    full_width = TRUE
+  )
+}
+```
+
+The `NonProbEst` package provides various methods for estimation in
+nonprobability surveys, including calibration to known population
+totals, propensity score adjustment with a probability reference survey,
+statistical matching, model-based estimation, model-assisted estimation,
+and model-calibrated estimation. It also implements machine-learning
+methods for propensity score estimation and outcome prediction. The
+`nonprobsvy` package also provides several methods with a unified
+interface. The package supports calibrated inverse probability
+weighting, mass imputation, matching-based prediction, nonparametric
+prediction, and doubly robust estimation. It also provides analytical
+variance estimation, variable selection, and balance checking.
+
+However, both `NonProbEst` and `nonprobsvy` use reference information
+from a single source at a time. In practice, however, accurate
+pseudo-weight estimation depends on including auxiliary variables that
+are related to participation in the nonprobability sample, and no single
+probability reference survey will necessarily contain all such
+variables. Important demographic, socioeconomic, health, behavioral, or
+occupational variables are often distributed across different reference
+surveys.
+
+This is the purpose for which `nonprobsampling` is developed. Its main
+contribution is the multi-reference calibration method, which allows
+users to combine auxiliary information from multiple probability
+reference surveys. By allowing different reference surveys to contribute
+different parts of the participation model, the package supports
+analyses that would be inaccurate with methods limited to one reference
+source. When only one reference survey is available, `nonprobsampling`
+supports one-reference pseudo-weighing methods, including raking ratio
+calibration, ALP, and CLW, as special cases of the same framework. The
+package therefore provides a consistent workflow for both the
+conventional one-reference setting and a more practically realistic
+multi-reference setting.
+
+The packages also differ in their support for categorical prevalence
+estimation and subpopulation estimation. All three packages can handle
+binary outcomes. `NonProbEst` supports proportion estimation for binary
+indicators, and `nonprobsvy` supports binary outcomes through binomial
+outcome models, but neither package provides multi-level categorical
+prevalence estimation. By contrast, in `nonprobsampling`, `pwmean()` can
+accept a categorical outcome as a factor and return category-specific
+prevalence estimates. Besides, neither `NonProbEst` nor `nonprobsvy`
+provides support for subgroup estimation in their workflow.
+`nonprobsampling` provides this functionality through the `zcol`
+argument in `pwmean()`, allowing users to estimate pseudo-weighted means
+(prevalence) and their corresponding standard errors within subgroups
+rather than only for the full sample. This is useful in practice because
+applied analyses often require computation and comparisons across
+population domains, such as age groups, sex, race, or health-risk
+groups. A method that only returns an overall estimate may hide
+important subgroup differences, whereas domain-specific estimates allow
+users to report results at the level most relevant to applied research
+questions.
+
+The packages also differ in their intended software workflow. In
+`NonProbEst`, users often move through a sequence of separate functions
+for constructing weights, estimating target quantities, and computing
+intervals. In `nonprobsvy`, the main workflow is centered on a single
+model-fitting function, `nonprob()`, whose behavior is controlled by
+specifying participation, outcome, and target formulas. In
+`nonprobsampling`, the workflow is deliberately split into two steps,
+separating pseudo-weights estimation from outcome estimation, so the
+same fitted pseudo-weights can be reused for multiple outcomes without
+refitting the participation model.
+
+The three packages also differ in how they use survey design
+information. `NonProbEst` is not integrated with `survey`; users supply
+probability reference surveys as ordinary data frames. `nonprobsvy` and
+`nonprobsampling` both integrate with `survey`, but they differ in the
+types of survey design objects supported for probability reference
+surveys. `nonprobsvy` supports reference surveys from standard
+multistage sampling designs, supplied as `survey.design` objects. In
+contrast, `nonprobsampling` accepts probability reference surveys as
+either a `survey.design` object or a `svyrep.design` object. This
+feature is useful when reference surveys provide replicate weights
+rather than full design information. Such replicate-weight formats are
+commonly used by statistical agencies such as Statistics Canada, the
+U.S. Census Bureau, and the Australian Bureau of Statistics.
+
+`nonprobsampling` should be viewed as complementary to `NonProbEst` and
+`nonprobsvy`. Users who need different types of nonprobability-sample
+estimators may find `nonprobsvy` or `NonProbEst` more appropriate. Users
+whose main goal is to construct pseudo-weights for a nonprobability
+sample, especially when the relevant auxiliary variables are split
+across different reference surveys, are the primary audience for
+`nonprobsampling`. The package's contribution is therefore not breadth
+across all nonprobability sample methods, but a focused and reproducible
+implementation of multi-reference pseudo-weighted estimation, with
+direct support for standard and replicate-weight survey design objects,
+multi-level categorical prevalence estimation, and domain-specific
+summaries.
+
+# Simulation
+
+This simulation study evaluates the performance of the multi-reference
+calibration method for estimating prevalence in a multi-level
+categorical outcome setting. The data generation and sampling design
+follows Section 6 of Landsman et al. (2026). The original study used
+continuous and binary outcomes, the present study extends the simulation
+framework to a three-level categorical outcome with three population
+domains. Performance is evaluated for the prevalence of each outcome
+category within each domain. The study also compares the multi-reference
+calibration estimator with and without cumulative precalibration.
+
+## Finite population and target parameters
+
+A finite population of size $N=500{,}000$ is generated and held fixed
+across simulation replications. The finite population contains four
+auxiliary variables with one categorical domain variable. The domain
+variable $x_1$ has three levels, denoted by A, B, and C, and is
+generated according to
+
+$$\Pr(x_{1i}=\mathrm{A})=0.50,\qquad
+\Pr(x_{1i}=\mathrm{B})=0.25,\qquad
+\Pr(x_{1i}=\mathrm{C})=0.25.$$
+
+Let $I_{Bi}=\mathbb{I}(x_{1i}=\mathrm{B})$ and
+$I_{Ci}=\mathbb{I}(x_{1i}=\mathrm{C})$. Three continuous auxiliary
+variables are generated as
+
+$$\begin{aligned}
+x_{2i} &= \nu_{2i}+0.3I_{Bi}+0.3I_{Ci},\\
+x_{3i} &= \nu_{3i}+0.2(I_{Bi}+I_{Ci}+x_{2i}),\\
+x_{4i} &= \nu_{4i}+0.1(I_{Bi}+I_{Ci}+x_{2i}+x_{3i}),
+\end{aligned}$$
+
+where $\nu_{2i}\sim\mathrm{Unif}(0,2)$, $\nu_{3i}\sim\mathrm{Exp}(1)$,
+and $\nu_{4i}\sim\chi^2(4)$.
+
+A latent continuous outcome variable is generated according to
+
+$$y_i^*
+=
+-0.5I_{Bi}-I_{Ci}-x_{2i}+x_{3i}+x_{4i}
++\epsilon_i,$$
+
+where $\epsilon_i\sim N(0,1)$. The observed outcome $y_i$ is a
+three-level categorical variable with levels Low, Medium, and High. The
+category labels are assigned based on the empirical 35th and 70th
+percentiles of $y^*$ in the finite population:
+
+$$y_i =
+\begin{cases}
+\mathrm{Low}, & y_i^*\leq c_1,\\
+\mathrm{Medium}, & c_1<y_i^*\leq c_2,\\
+\mathrm{High}, & y_i^*>c_2,
+\end{cases}$$
+
+where $c_1$ and $c_2$ denote the 35th and 70th percentiles of $y^*$.
+Therefore, the marginal finite population prevalence of Low, Medium, and
+High are approximately 0.35, 0.35, and 0.30. Since the domain variable
+$x_1$ affects the outcome distribution, the category prevalence differ
+across the three domains.
+
+The parameters of interest are the domain-specific prevalence for each
+outcome category. For domain $d$ and outcome category $\ell$, the target
+parameter is defined as
+
+$$P_{d\ell}
+=
+\frac{
+\sum_{i\in FP}
+\mathbb{I}(x_{1i}=d)
+\mathbb{I}(y_i=\ell)
+}{
+\sum_{i\in FP}
+\mathbb{I}(x_{1i}=d)
+},$$
+
+where $d\in\{\mathrm{A},\mathrm{B},\mathrm{C}\}$ and
+$\ell\in\{\mathrm{Low},\mathrm{Medium},\mathrm{High}\}$. The nine finite
+population domain-specific prevalence are calculated before sampling and
+treated as the true values for evaluating estimator performance.
+
+## Sampling design
+
+Two probability reference surveys and one nonprobability sample are
+independently selected from the finite population in each replication.
+
+The first probability reference survey, $s_{p1}$, is selected by Poisson
+sampling with expected sample size $n_{p1}=12{,}500$. Its inclusion
+probabilities are
+
+$$\pi_i^{(p1)}
+=
+\frac{n_{p1}q_i}{\sum_{j\in\mathrm{FP}}q_j},
+\qquad
+q_i=c_1+x_{3i}+0.03y_i^*,$$
+
+where $c_1$ is chosen so that the ratio of the largest to the smallest
+value of $q_i$ is 20.
+
+The second probability reference survey, $s_{p2}$, is selected by
+randomized systematic probability-proportional-to-size sampling with
+fixed sample size $n_{p2}=25{,}000$. Its first-order inclusion
+probabilities are proportional to
+
+$$z_i=0.05+x_{2i}.$$
+
+The nonprobability sample, $s_c$, is generated independently by Poisson
+sampling with expected size $n_c=2{,}500$. The participation
+probabilities follow
+
+$$\pi_i^c
+=
+\exp\left(
+\beta_0
++0.18I_{Bi}
++0.18I_{Ci}
++0.18x_{2i}
+-0.27x_{3i}
+-0.1x_{4i}
+\right),$$
+
+where $\beta_0$ is selected so that
+$\sum_{i\in\mathrm{FP}}\pi_i^c=2{,}500$.
+
+The outcome $y$ and all four auxiliary variables are observed in the
+nonprobability sample. In contrast, $s_{p1}$ contains only $x_1$ and
+$x_2$, whereas $s_{p2}$ contains only $x_3$ and $x_4$. The two
+probability reference surveys therefore supply complementary auxiliary
+information, and neither survey alone contains the complete set of
+variables in the participation model.
+
+## Simulation scenarios and estimation
+
+Each simulated dataset was analyzed using the multi-reference
+calibration method implemented by `est_pw()`. The participation formula
+was
+
+``` r
+p_formula = list(
+  ~ x1 + x2,
+  ~ x3 + x4
+)
+```
+
+corresponding to the auxiliary variables observed in $s_{p1}$ and
+$s_{p2}$. Two precalibration cases were compared:
+
+1.  **No precalibration:** multi-reference calibration was fitted with
+    `precali = FALSE`.
+2.  **Precalibration:** multi-reference calibration was fitted with
+    `precali = TRUE`.
+
+Since there were no auxiliary variables shared between the probability
+reference surveys, cumulative precalibration in the second case aligned
+only the sum of the survey weights (the estimated finite population
+size) before the pseudo-weight estimation step. For `sp_order`, the
+package used its default size-based ordering. Therefore, the larger
+survey, $s_{p2}$, was processed first, and its estimated population size
+was used as the target when precalibrating $s_{p1}$.
+
+For each fitted pseudo-weight object, `pwmean()` was called with
+`y = "y"` and `zcol = "x1"`. Since $y$ was a factor, the function
+estimated the prevalence of each outcome category. Since $x_1$ was
+supplied as the domain variable, separate prevalence estimates were
+returned for domains A, B, and C. Each fitted model therefore produced
+nine pseudo-weighted prevalence, corresponding standard errors and 95%
+confidence interval.
+
+## Evaluation metrics
+
+For each domain $d$, outcome category $\ell$, and precalibration case
+$m$, the simulation was repeated $B = 4000$ times. In replication $b$,
+let $\widehat{P}_{d\ell m}^{(b)}$ denote the estimated prevalence and
+let $\widehat{\mathrm{SE}}_{d\ell m}^{(b)}$ denote its analytic standard
+error. The true finite population prevalence is denoted by $P_{d\ell}$.
+
+To evaluate the point estimators, relative bias (RB) and mean squared
+error (MSE) were calculated as
+
+$$\mathrm{RB}(\%)
+=
+\frac{100}{B}
+\sum_{b=1}^{B}
+\frac{\widehat{P}_{d\ell m}^{(b)}-P_{d\ell}}{P_{d\ell}}.$$
+
+and
+
+$$\mathrm{MSE}\times100
+=
+\frac{100}{B}
+\sum_{b=1}^{B}
+\left(\widehat{P}_{d\ell m}^{(b)}-P_{d\ell}\right)^2.$$
+
+To evaluate the analytic variance estimators, the average estimated
+variance, multiplied by 100, was calculated as
+
+$${v}\times100
+=
+\frac{100}{B}
+\sum_{b=1}^{B}
+\left\{\widehat{\mathrm{SE}}_{d\ell m}^{(b)}\right\}^2$$
+
+The standard error ratio (SER) compares the average estimated standard
+error with the empirical standard deviation of the prevalence estimates:
+
+$$\mathrm{SER}
+=
+\frac{
+B^{-1}
+\sum_{b=1}^{B}
+\widehat{\mathrm{SE}}_{d\ell m}^{(b)}
+}{
+\mathrm{SD}\left(
+\widehat{P}_{d\ell m}^{(1)},\ldots,
+\widehat{P}_{d\ell m}^{(B)}
+\right)
+}.$$
+
+Values of SER near 1 indicate agreement between the analytic and
+empirical standard errors.
+
+Finally, coverage probability (CP) was calculated as the proportion of
+nominal 95% Wald confidence intervals that contained the true
+prevalence:
+
+$$\mathrm{CP}
+=
+\frac{1}{B}
+\sum_{b=1}^{B}
+\mathbb{I}\left[
+\widehat{P}_{d\ell m}^{(b)}-1.96\widehat{\mathrm{SE}}_{d\ell m}^{(b)}
+\leq P_{d\ell}\leq
+\widehat{P}_{d\ell m}^{(b)}+1.96\widehat{\mathrm{SE}}_{d\ell m}^{(b)}
+\right].$$
+
+CP was reported as a proportion between 0 and 1. The metrics are
+reported as `RB(%)`, `v(*100)`, `MSE(*100)`, `SER`, and `CP` in the
+simulation results table below.
+
+## Simulation results
+
+Table \@ref(tab:simulation-results) summarizes the performance of the
+multi-reference calibration estimators for estimating domain-specific,
+category-specific prevalence, with and without cumulative
+precalibration.
+
+```{r simulation-results, echo=FALSE}
+results_table <- data.frame(
+  domain = rep(c("A", "B", "C"), times = 6),
+  outcome = rep(
+    rep(c("Low", "Medium", "High"), each = 3),
+    times = 2
+  ),
+  precali_case = rep(
+    c("No precalibration", "Precalibration"),
+    each = 9
+  ),
+  `RB (%)` = sprintf("%.2f", c(
+    -0.2383, -0.2595, -0.2233, 0.1807, 0.1635, 0.2378,
+    0.0200, 0.1230, 0.0818, -0.2484, -0.2681, -0.2308,
+    0.1840, 0.1648, 0.2414, 0.0256, 0.1320, 0.0902
+  )),
+  `v (*100)` = sprintf("%.2f", c(
+    0.0154, 0.0331, 0.0376, 0.0210, 0.0376, 0.0373,
+    0.0201, 0.0418, 0.0397, 0.0154, 0.0331, 0.0376,
+    0.0210, 0.0376, 0.0373, 0.0201, 0.0418, 0.0397
+  )),
+  `MSE (*100)` = sprintf("%.2f", c(
+    0.0157, 0.0327, 0.0380, 0.0214, 0.0371, 0.0375,
+    0.0206, 0.0417, 0.0405, 0.0156, 0.0324, 0.0378,
+    0.0214, 0.0371, 0.0375, 0.0205, 0.0416, 0.0405
+  )),
+  SER = sprintf("%.2f", c(
+    0.9915, 1.0065, 0.9946, 0.9918, 1.0060, 0.9977,
+    0.9856, 1.0002, 0.9897, 0.9938, 1.0108, 0.9976,
+    0.9914, 1.0065, 0.9982, 0.9887, 1.0014, 0.9894
+  )),
+  CP = sprintf("%.2f", c(
+    0.9462, 0.9492, 0.9505, 0.9515, 0.9472, 0.9512,
+    0.9470, 0.9480, 0.9448, 0.9435, 0.9528, 0.9528,
+    0.9508, 0.9490, 0.9508, 0.9478, 0.9480, 0.9450
+  )),
+  check.names = FALSE
+)
+
+names(results_table)[1:3] <- c("Domain", "Outcome", "Precalibration")
+
+results_table_output <- knitr::kable(
+  results_table,
+  format = if (knitr::is_latex_output()) "latex" else "html",
+  align = rep("c", 8),
+  caption = "Simulation results.",
+  booktabs = TRUE,
+  row.names = FALSE,
+  linesep = ""
+)
+
+if (knitr::is_latex_output()) {
+  simulation_widths <- c("1cm", "1.2cm", "2.4cm", "1cm", "1cm", "1.25cm", "0.95cm", "0.95cm")
+  for (column_index in seq_along(simulation_widths)) {
+    results_table_output <- kableExtra::column_spec(
+      results_table_output,
+      column = column_index,
+      width = simulation_widths[[column_index]]
+    )
+  }
+  results_table_output <- kableExtra::row_spec(
+    results_table_output,
+    row = c(3, 6, 9, 12, 15),
+    extra_latex_after = "\\addlinespace[3pt]"
+  )
+  kableExtra::kable_styling(
+    results_table_output,
+    latex_options = "hold_position",
+    font_size = 8
+  )
+} else {
+  kableExtra::kable_styling(
+    results_table_output,
+    bootstrap_options = c("striped", "condensed", "responsive"),
+    full_width = TRUE
+  )
+}
+```
+
+*Note:* RB is relative bias in percent; $v\times100$ is the average
+estimated analytic variance multiplied by 100; MSE$\times100$ is the
+mean squared error multiplied by 100; SER is the ratio of the average
+estimated standard error to the empirical standard deviation of the
+point estimates; and CP is the empirical coverage proportion of nominal
+95% Wald confidence intervals.
+
+# Illustration
+
+This section illustrates how `nonprobsampling` can be used with multiple
+probability reference surveys using the example datasets included in the
+package. Because the basic function workflow has already been
+introduced, the emphasis here is on the applied use of the
+multi-reference method. Specifically, the section explains why multiple
+reference surveys are useful in this example, how the multi-reference
+interface is specified in practice, how to interpret the output from
+`est_pw()` and `pwmean()`, and how to assess whether the numerical
+solver has converged successfully (**satisfactorily**). The section also
+evaluates the resulting pseudo-weighted estimates by comparing them with
+the unweighted estimates from the nonprobability sample and with the
+true finite population means used as benchmarks.
+
+## Example data
+
+```{r load-data, include=FALSE}
+library(nonprobsampling)
+
+data("sc")
+data("sp1")
+data("sp2")
+```
+
+The illustration uses the example datasets included in
+`nonprobsampling`. The three datasets are summarized in Table
+\@ref(tab:data-summary). These datasets are used to demonstrate
+estimation of the mean serum prostate-specific antigen (PSA) level among
+U.S. men aged 55 years and older. The outcome of interest is `psa_level`
+(ng/mL), a continuous measure of serum PSA level stored as a numeric
+variable.
+
+### Construction of the `sc` sample
+
+Dr. Landsman: PLEASE ADD HERE
+
+JIAKUN:**,** \*\* WHAT IS CORRECT, DATASET or DATA SET?\*\* (**DATASET
+will be used through the paper**)
+
+The dataset `sc` represents the nonprobability sample to be adjusted. It
+contains the outcome variable `psa_level`, along with auxiliary
+variables related to participation.
+
+<!-- DRAFT REMOVED: ### Probability reference surveys -->
+
+**NEED TO DEFINE NHAMES AND NHIS - GOOD TO INCLUDE WHAT THESE SURVEYS
+MEASURE IN GENERAL**
+
+<!-- DRAFT REMOVED: The datasets `sp1` and `sp2` represent probability reference surveys and provide external auxiliary information for estimating pseudo-weights. Notably, psa_level is also available in sp1. Although outcomes are typically observed only in the nonprobability sample, including the outcome in the participation model may help reduce bias when the participation probability also depends on the outcome. -->
+
+<!-- DRAFT REMOVED: For illustration, all shared variables have already been harmonized across the example datasets. Variable names, factor levels, and category definitions are consistent. In user-supplied data, this harmonization must be completed before calling est_pw(), because the package assumes that variables with the same name have compatible meanings and coding across data sources. -->
+
+### Probability reference surveys
+
+The datasets `sp1` and `sp2` represent probability reference surveys and
+provide external auxiliary information for estimating pseudo-weights.
+The dataset `sp1` is derived from the National Health and Nutrition
+Examination Survey (NHANES), a nationally representative survey designed
+to collect information on health conditions, health-related behaviors,
+and clinical measurements in the U.S. population. The dataset `sp2` is
+derived from the National Health Interview Survey (NHIS), a nationally
+representative survey that collects information on health status, health
+care access, and related characteristics through household interviews.
+Both surveys use complex probability sampling designs and provide survey
+weights that support design-based population inference.
+
+<!-- DRAFT REMOVED: ### Motivation for the multi-reference method -->
+
+**BRING THIS SECTION BEFORE OR RIGHT AFTER PROBABILITY REFERENCE
+SURVEYS? (now it's right after)**
+
+These datasets also illustrate why multiple reference surveys are needed
+in practice. Both reference surveys contain shared variables such as
+`agecat`, `race`, and `comorbidity`. In addition, the first reference
+survey, `sp1`, includes variables such as `education` and
+`pros_enlarged`, whereas the second reference survey, `sp2`, includes
+variables such as `BMI` and `diabetes`. These additional variables are
+likely related to participation. Relying on a single reference survey
+may limit the set of available auxiliary variables and lead to less
+effective adjustment if important variables are missing. The
+multi-reference method combines variables from both surveys when
+estimating pseudo-weights for the nonprobability sample, thereby
+improving the use of available information.
+
+Notably, `psa_level` is also available in `sp1`. Although outcomes are
+typically observed only in the nonprobability sample, including the
+outcome in the participation model may help reduce bias when
+participation probabilities depend on the outcome or outcome-related
+characteristics.
+
+For illustration, all shared variables have already been harmonized
+across the example datasets. Variable names, factor levels, and category
+definitions are consistent. In user-supplied data, this harmonization
+must be completed before calling `est_pw()`, because the package assumes
+that variables with the same name have compatible meanings and coding
+across data sources.
+
+```{r data-summary, echo=FALSE}
+dataset_info <- data.frame(
+  Dataset = c("sc", "sp1", "sp2"),
+  Type = c(
+    "Nonprobability sample",
+    "First probability reference survey",
+    "Second probability reference survey"
+  ),
+  Source = c(
+    "Synthetic sample generated from an NHANES-based finite population",
+    "NHANES 1999--2010",
+    "NHIS 1997--2008"
+  ),
+  Sample_size = c(nrow(sc),nrow(sp1),nrow(sp2)),
+  check.names = FALSE
+)
+
+knitr::kable(
+  dataset_info,
+  caption = "Datasets included in the package.",
+  align = c("l", "l", "l", "r")
+)
+
+```
+
+### Survey design objects
+
+Before pseudo-weight estimation, each probability reference survey needs
+to be represented as a `survey` design object. These objects store the
+survey design information used by `nonprobsampling` when estimating
+pseudo-weights and computing standard errors.
+
+```{r survey-designs}
+ref1_design <- survey::svydesign(
+  ids     = ~psu_sp1,
+  strata  = ~strata_sp1,
+  weights = ~wts_sp1,
+  data    = sp1,
+  nest    = TRUE
+)
+
+ref2_design <- survey::svydesign(
+  ids     = ~psu_sp2,
+  strata  = ~strata_sp2,
+  weights = ~wts_sp2,
+  data    = sp2,
+  nest    = TRUE
+)
+```
+
+The resulting objects, `ref1_design` and `ref2_design`, are then
+supplied to `est_pw()` together with the nonprobability sample, `sc`.
+
+## Multi-reference calibration
+
+The example below is a typical use of the main function `est_pw()`, the
+two formulas in `p_formula` correspond to the two reference survey
+design objects supplied after `sc`. The formulas specify which auxiliary
+variables each reference survey contributes to the participation model.
+In general, users should include the relevant variables that are shared
+between the nonprobability sample and each reference survey, unless
+there is a practical reason to exclude them.
+
+Cumulative precalibration is recommended for most multi-reference
+analyses. In this example, with `precali = TRUE`, the package uses the
+overlapping variables specified in `p_formula`, such as `agecat`,
+`race`, and `comorbidity`, to align the reference surveys before
+estimating the final pseudo-weights.
+
+The fitted object returned by `est_pw()` stores the estimated
+pseudo-weights and the information needed for subsequent outcome
+estimation. The `summary()` output provides detailed information about
+how the multi-reference calibration method was implemented, while the
+`print()` output gives a shorter overview of the fitted object.
+
+```{r multi-ref-fit}
+fit_multi <- est_pw(
+  data = list(sc, ref1_design, ref2_design),
+  p_formula = list(
+    ~ agecat + race + education + pros_enlarged + comorbidity + psa_level + BMI,
+    ~ agecat + race + BMI + diabetes + comorbidity
+  ),
+  method   = "multi",
+  sp_order = "size",
+  precali  = TRUE
+)
+
+summary(fit_multi)
+```
+
+In this output, the method is reported as multi-reference calibration,
+confirming that pseudo-weights were estimated from two probability
+reference surveys rather than relying on a single reference survey.
+Because `sp_order = "size"` was used, the reference surveys were ordered
+by sample size before estimation. The summary shows that `sp[[2]]`,
+corresponding to the second provided probability survey, which is `sp2`
+in our example, is the largest reference survey and is therefore treated
+as the non-calibrated reference survey in the cumulative precalibration
+step. The smaller reference survey, `sp[[1]]`, corresponding to `sp1`,
+is calibrated to match selected weighted totals from `sp2`.
+
+The precalibration summary identifies the variables used to align the
+two reference surveys before the final pseudo-weight estimation step. In
+this example, the calibrated variables include the total survey weight
+and the overlapping variables `agecat`, `race`, and `comorbidity`, after
+expansion into model-matrix columns such as `agecat2`, `race2`, and
+`comorbidity1`. This means that `sp1` is first adjusted so that its
+weighted totals for these overlapping variables agree with the
+corresponding totals from `sp2`.
+
+The reference samples summary shows how variables are distributed and
+selected across the two reference surveys. The section labelled “Shared
+variables” lists the variables available from each reference survey
+after factor variables have been converted into model-matrix columns.
+The section labelled “Variables used for calculation” shows which
+columns are actually used in the final multi-reference calibration
+equations. Because `sp2` is larger, the overlapping variables are taken
+from `sp2`. Therefore, `agecat`, `race`, `BMI`, `diabetes`, and
+`comorbidity` are used from `sp2`, while only the variables unique to
+`sp1`, namely `education`, `pros_enlarged`, and `psa_level`, are used
+from `sp1`. This reflects the main advantage of the multi-reference
+interface: it allows different reference surveys to contribute different
+parts of the participation model.
+
+The line beginning “Participation model involves the following
+variables” lists the full set of auxiliary variables used to estimate
+pseudo-weights for the nonprobability sample. The variable names appear
+in their model-matrix form. For example, the factor variable `agecat` is
+represented by the indicator columns `agecat2`, `agecat3`, and
+`agecat4`, with the omitted category serving as the reference category.
+Similarly, `race`, `BMI`, `education`, `diabetes`, `comorbidity`, and
+`pros_enlarged` are represented by one or more indicator columns. The
+variable `psa_level` is included as a numeric auxiliary variable. In
+total, the participation model uses demographic, health, education,
+prostate-related, and outcome-related information drawn from both
+reference surveys.
+
+The solver diagnostics indicate whether the estimating equations were
+solved successfully. In this example, the solver is `nleqslv` with the
+Newton method. The termination code is 2, and the message states that
+the parameter values are within the tolerance `xtol`. This means that
+the solver stopped because successive parameter updates became
+sufficiently small. The final maximum absolute estimating equations
+value is `6.557e-07`. This value is slightly larger than the default
+function-value tolerance of `1e-8`, but it is still small in practical
+terms. The printed output therefore reports “converged (tolerance
+warning)” because convergence was reached through the parameter-step
+criterion rather than the function-value criterion. Together with the
+small number of iterations, this suggests that the numerical solution is
+acceptable for this illustration. In practice, users should inspect both
+the termination message and the final maximum absolute estimating
+equations value. A successful termination message, combined with a small
+`max|EE|`, supports treating the fitted pseudo-weights as numerically
+stable. If `max|EE|` is large, or if the solver stops without
+convergence, users should consider adjusting the solver controls,
+checking sparse factor levels, or revising the participation model.
+
+The participation model coefficients describe the fitted
+pseudo-weighting model. These coefficients are used to construct the
+pseudo-weights and should not be interpreted as regression coefficients
+from an outcome model. In application, they are mainly diagnostic. Users
+can inspect them to confirm that the model was fitted and to check
+whether any coefficient is unusually large, which may indicate numerical
+instability, sparse categories, or strong imbalance between the
+nonprobability sample and the reference surveys.
+
+The final line of the summary reports that 1190 observations were
+deleted due to missingness in `sp[[1]]`. This refers to (NUMBER OF ROWS
+WITH?) missing values in variables used from the first reference survey
+after the participation model was specified. Since the default missing
+data handling uses complete cases for participation model variables,
+these observations are excluded from the pseudo-weight estimation step.
+This message is important because heavy missingness in a reference
+survey can reduce the amount of information contributed by that survey
+and should be considered when interpreting the results.
+
+```{r print-multi-ref-fit}
+print(fit_multi)
+```
+
+The shorter `print()` output summarizes the fitted object. It reports
+that the fitted object has class `"pw_fit"`, uses the multi-reference
+calibration method, and contains a participation model with 18
+parameters. It also reports the convergence status and the distribution
+of the estimated pseudo-weights. In this example, the pseudo-weights
+range from 33,303 to 1,099,805, with a median of 100,305 and a mean of
+106,180. The sum of pseudo-weights is 255,256,038, which represents the
+estimated population size implied by the pseudo-weighted nonprobability
+sample. Very large pseudo-weights indicates that some observations in
+the nonprobability sample represent population segments that are weakly
+represented in the observed sample. This is not necessarily a problem,
+but it should be checked because they can increase the variance of
+pseudo-weighted estimators.
+
+Taken together, these outputs show that the multi-reference fit uses the
+two reference surveys as intended. The larger survey, `sp2`, supplies
+the overlapping variables and its survey-specific variables, while `sp1`
+supplies the variables not available in `sp2`. The solver diagnostics do
+not suggest a serious numerical problem, and the pseudo-weight
+distribution gives a useful check on the scale and extremity of the
+pseudo-weights. These diagnostics should be checked before using the
+fitted object for outcome estimation with `pwmean()`.
+
+## Mean and variance estimation
+
+After the pseudo-weights have been estimated by `est_pw()`, the fitted
+object can be passed to `pwmean()` for outcome estimation. In this
+example, we first estimate the overall mean of `psa_level` using the
+multi-reference pseudo-weights.
+
+```{r multi-psa}
+multi_psa <- pwmean(fit_multi, y = "psa_level")
+
+print(multi_psa)
+```
+
+The printed output reports the pseudo-weighted undefined mean of serum
+PSA level as 1.893 ng/mL, with a standard error of 0.019 and a 95%
+confidence interval from 1.855 to 1.931. This estimate is obtained after
+adjusting the nonprobability sample with auxiliary information
+contributed by both reference surveys.
+
+```{r print-multi_psa}
+summary(multi_psa)
+```
+
+The summary output also reports the unweighted estimate from the
+original nonprobability sample. Before adjustment, the unweighted mean
+of psa_level is 1.536 ng/mL, with a 95% confidence interval from 1.468
+to 1.605. After pseudo-weighting, the estimated mean increases to 1.893
+ng/mL, with a 95% confidence interval from 1.855 to 1.931. The upward
+shift suggests that the original nonprobability sample underrepresents
+individuals who have auxiliary-variable profiles associated with higher
+PSA levels. After the sample is adjusted to better match the
+auxiliary-variable information from the reference surveys, the estimated
+population mean becomes larger.
+
+Domain-specific estimates can be obtained by supplying a factor variable
+or 0/1 numeric variable to `zcol`. For example, the following code
+estimates the mean of `psa_level` separately within BMI categories.
+
+```{r multi-domain-psa}
+multi_psa_bmi <- pwmean(
+  fit_multi,
+  y    = "psa_level",
+  zcol = "BMI"
+)
+print(multi_psa_bmi)
+```
+
+The domain estimates use the same fitted pseudo-weights from
+`fit_multi`. The participation model is not refitted for each BMI
+category. Instead, `pwmean()` reuses the pseudo-weights and computes a
+separate pseudo-weighted mean within each domain. This is useful when
+the same adjustment model is intended to support several outcome or
+subgroup analyses.
+
+The same function can also be used when the outcome is categorical. In
+this case, `pwmean()` reports estimated prevalence for each category.
+The following example treats `diabetes` as a categorical outcome.
+
+```{r multi-categorical-outcome}
+multi_diabetes <- pwmean(fit_multi, y = "diabetes")
+summary(multi_diabetes)
+```
+
+For the diabetes outcome, the unweighted estimate from the
+nonprobability sample gives a diabetes prevalence of 17.6%. After
+pseudo-weighting, the estimated prevalence decreases to 15.7%, with a
+95% confidence interval from 15.2% to 16.2%. Equivalently, the estimated
+prevalence of not having diabetes increases from 82.4% before adjustment
+to 84.3% after adjustment. This result indicates that the nonprobability
+sample contains a higher proportion of individuals with diabetes than
+would be expected after adjustment to the auxiliary information
+represented by the reference surveys.
+
+## Optional: Sensitivity to cumulative precalibration
+
+Cumulative precalibration can be turned off by setting
+`precali = FALSE`. This provides a sensitivity analysis for checking
+whether the alignment of overlapping variables across reference surveys
+noticeably affects the final estimate. If the pseudo-weighted estimates
+with and without cumulative precalibration differ substantially, the
+analyst should examine whether the reference surveys target the same
+population and whether the overlapping variables are measured and coded
+consistently.
+
+```{r multi-no-precali, eval=FALSE}
+fit_multi_no_precali <- est_pw(
+  data = list(sc, ref1_design, ref2_design),
+  p_formula = list(
+    ~ agecat + race + education + pros_enlarged + comorbidity,
+    ~ agecat + race + BMI + diabetes + comorbidity
+  ),
+  method   = "multi",
+  sp_order = "size",
+  precali  = FALSE
+)
+
+multi_psa_no_precali <- pwmean(fit_multi_no_precali, y = "psa_level")
+print(multi_psa_no_precali)
+```
+
+## Optional: One-reference calibration as a special case
+
+A one-reference analysis can be viewed as a special case of the
+multi-reference analysis. The same basic components are still present: a
+nonprobability sample, a probability reference survey, a participation
+model, and a fitted pseudo-weight object. The difference is that all
+auxiliary information is from a single reference survey. As a result,
+there is no ordering of reference surveys, no cumulative precalibration,
+and no variables selection across different reference surveys. **DO WE
+NEED TO EXPLAIN THE DIFFERENT METHODS AVAILABLE FOR ONE_REFERENCE CASE
+HERE?** **please check the following paragraph**
+
+When one probability reference survey is available, `est_pw()` supports
+several pseudo-weighting methods, including raking-ratio calibration
+(`method = "calibration"`), adjusted logistic propensity
+(`method = "ALP"`), and Chen--Li--Wu (`method = "CLW"`). These methods
+share the same workflow: users provide the nonprobability sample and the
+reference survey design object, estimate pseudo-weights using
+`est_pw()`, and obtain outcome estimates using `pwmean()`.
+
+```{r one-ref-fit}
+fit_one <- est_pw(
+  data      = list(sc, ref1_design),
+  p_formula = ~ agecat + race + education + pros_enlarged +
+    comorbidity + BMI + diabetes + psa_level,
+  method    = "calibration"
+)
+
+summary(fit_one)
+```
+
+The summary output reflects this simpler structure. The method is
+reported as one-reference calibration, and the participation model
+contains variables available in both `sc` and `sp1`. The model includes
+demographic variables such as `agecat` and `race`, health variables such
+as `comorbidity`, `BMI`, and `diabetes`, and variables such as
+`education` and `pros_enlarged` that are available from `sp1`. In
+contrast to the multi-reference fit, there is no summary of the
+reference surveys showing which variables are taken from each survey.
+
+The solver diagnostics indicate satisfactory convergence. The
+termination code is 2, and the message states that the function
+criterion is near zero. The final maximum absolute estimating equation
+value is 2.235e-08, which is very small. Compared with the
+multi-reference fit, the one-reference calibration fit converges in
+fewer iterations. This is expected because the one-reference estimating
+problem is simpler.
+
+After the pseudo-weights have been estimated, the fitted object can be
+passed to `pwmean()` in the same way as the multi-reference fitted
+object.
+
+```{r pwmean-one_fit}
+pwmean(fit_one,y= "psa_level")
+```
+
+## Evaluation against the unweighted estimator
+
+The results in Table \@ref(tab:estimator-comparison) show that
+pseudo-weighting changes the PSA estimates in the expected direction. To
+quantify this improvement, this subsection compares the multi-reference
+pseudo-weighted estimator with the unweighted estimator from the
+nonprobability sample. The true finite population values, computed from
+the underlying finite population, are used as reference targets for the
+evaluation.
+
+**DO WE NEED TO SHOW THREE DECIMAL PLACE? IS TWO ENOUGH?** (original
+outcome is needed from Dr. Landsman)
+
+```{r estimator-comparison, echo=FALSE}
+true_psa_fp <- c(
+  "overall" = 1.976,
+  "Normal" = 2.52,
+  "Overweight" = 1.83,
+  "Obese" = 1.70,
+  "Morbidly Obese" = 1.90
+)
+
+overall_estimates <- multi_psa$estimates
+bmi_estimates <- multi_psa_bmi$estimates
+bmi_estimates$domain <- sub("^BMI = ", "", bmi_estimates$domain)
+
+comparison_estimates <- rbind(overall_estimates, bmi_estimates)
+comparison_estimates$domain[comparison_estimates$domain == "Overall"] <- "overall"
+comparison_estimates <- comparison_estimates[
+  match(names(true_psa_fp), comparison_estimates$domain),
+]
+
+comparison_table <- data.frame(
+  Domain = c("Overall", "Normal", "Overweight", "Obese", "Morbidly Obese"),
+  `True value` = true_psa_fp,
+  `Unweighted estimate (95% CI)` = sprintf(
+    "%.3f (%.3f-%.3f)",
+    comparison_estimates$unweighted_mean,
+    comparison_estimates$unweighted_lower,
+    comparison_estimates$unweighted_upper
+  ),
+  `Unweighted bias` = sprintf(
+    "%.1f%%",
+    100 * (comparison_estimates$unweighted_mean - true_psa_fp) / true_psa_fp
+  ),
+  `Pseudo-weighted estimate (95% CI)` = sprintf(
+    "%.3f (%.3f-%.3f)",
+    comparison_estimates$adjusted_mean,
+    comparison_estimates$adjusted_lower,
+    comparison_estimates$adjusted_upper
+  ),
+  `Pseudo-weighted bias` = sprintf(
+    "%.1f%%",
+    100 * (comparison_estimates$adjusted_mean - true_psa_fp) / true_psa_fp
+  ),
+  `Error reduction` = sprintf(
+    "%.3f%%",
+    100 * (
+      abs((comparison_estimates$unweighted_mean - true_psa_fp) / true_psa_fp) -
+        abs((comparison_estimates$adjusted_mean - true_psa_fp) / true_psa_fp)
+    ) / abs((comparison_estimates$unweighted_mean - true_psa_fp) / true_psa_fp)
+  ),
+  check.names = FALSE
+)
+
+numeric_cols <- vapply(comparison_table, is.numeric, logical(1))
+comparison_table[numeric_cols] <- lapply(
+  comparison_table[numeric_cols],
+  round,
+  digits = 3
+)
+
+if (knitr::is_latex_output()) {
+  comparison_table[[4]] <- gsub("%", "\\%", comparison_table[[4]], fixed = TRUE)
+  comparison_table[[6]] <- gsub("%", "\\%", comparison_table[[6]], fixed = TRUE)
+  comparison_table[[7]] <- gsub("%", "\\%", comparison_table[[7]], fixed = TRUE)
+  names(comparison_table) <- kableExtra::linebreak(
+    c(
+      "Domain",
+      "True\nvalue",
+      "Un-\nweighted\nestimate\n(95\\% CI)",
+      "Un-\nweighted\nbias",
+      "Pseudo-\nweighted\nestimate\n(95\\% CI)",
+      "Pseudo-\nweighted\nbias",
+      "Error\nreduction"
+    ),
+    align = "c"
+  )
+}
+
+comparison_table_output <- knitr::kable(
+  comparison_table,
+  format = if (knitr::is_latex_output()) "latex" else "html",
+  caption = paste(
+    "Comparison of unweighted and multi-reference pseudo-weighted estimates"
+  ),
+  align = c("l", rep("c", 6)),
+  row.names = FALSE,
+  booktabs = TRUE,
+  escape = !knitr::is_latex_output()
+)
+
+if (knitr::is_latex_output()) {
+  table4_widths <- c("1.6cm", "1.1cm", "2.2cm", "1.3cm", "2.2cm", "1.3cm", "1.3cm")
+  for (column_index in seq_along(table4_widths)) {
+    comparison_table_output <- kableExtra::column_spec(
+      comparison_table_output,
+      column = column_index,
+      width = table4_widths[[column_index]]
+    )
+  }
+  kableExtra::kable_styling(
+    comparison_table_output,
+    latex_options = "hold_position",
+    font_size = 9
+  )
+} else {
+  kableExtra::kable_styling(
+    comparison_table_output,
+    bootstrap_options = c("striped", "condensed", "responsive"),
+    full_width = TRUE
+  )
+}
+```
+
+Relative bias is computed as the estimator minus the true finite
+population value, divided by the true finite population value, and is
+reported as a percentage. The table shows that the pseudo-weighted
+estimator is closer to the true finite population value than the
+unweighted estimator for the overall mean and for every BMI domain. For
+the overall PSA mean, the unweighted mean is 1.536, compared with the
+true finite population value of 1.976. This gives a relative bias of
+-22.3%. After adjustment, the pseudo-weighted mean is 1.893, reducing
+the relative bias to -4.2%. This corresponds to an 81.0% reduction in
+relative bias.
+
+The same pattern appears across BMI categories. The largest improvement
+is observed for the Normal BMI group. In this domain, the relative bias
+decreases from -32.8% to -1.5%, corresponding to a 95.4% reduction in
+absolute relative bias. The multi-reference estimator also reduces the
+magnitude of the relative bias for the Overweight, Obese, and Morbidly
+Obese groups, although the size of the improvement differs by domain.
+
+These results show that the gain from pseudo-weighting is not limited to
+the overall mean. The adjustment also improves subgroup estimates, even
+when the magnitude and direction of the unweighted relative bias differ
+across BMI categories. This is relevant for applied analyses because
+users often need adjusted estimates not only for the full study
+population but also for meaningful subgroups.
+
+Overall, this comparison supports the value of the multi-reference
+method in this example. By combining auxiliary information from both
+probability reference surveys, the method produces pseudo-weighted
+estimates that are closer to the true finite population values than the
+unweighted estimates from the nonprobability sample. This provides
+empirical evidence that multi-reference calibration method can reduce
+bias when variables related to participation are distributed across
+multiple probability reference surveys.
+
+# Discussion
+
+This paper introduced `nonprobsampling`, an R package for finite
+population inference from a nonprobability sample using auxiliary
+information from multiple probability reference surveys. The package
+implements pseudo-weighing methods based on the generalized estimating
+equations framework of Landsman et al. (2026). The main contribution of
+`nonprobsampling` is its support for multi-reference pseudo-weight
+estimation with cumulative precalibration. Existing R packages for
+nonprobability sample inference mainly support settings in which the
+auxiliary variables needed for the participation model come from a
+single reference survey. `nonprobsampling` addresses this limitation by
+allowing users to combine auxiliary information from multiple reference
+surveys within one estimation workflow.
+
+The simulation study showed satisfactory performance of the
+multi-reference calibration estimator for category-specific prevalence
+estimation across population domains. Across all domains and outcome
+categories, relative bias was small, standard error ratios were close to
+1, and empirical coverage of 95% confidence intervals was close to the
+target level. The estimates obtained with and without cumulative
+precalibration were similar in this simulation setting, reflecting the
+limited overlap of auxiliary variables between the reference surveys.
+
+The illustration using the package datasets demonstrated the practical
+utility of the multi-reference workflow. The pseudo-weighted estimates
+were closer to the finite population true values than the unweighted
+estimates from the nonprobability sample. For the overall PSA mean, the
+relative bias was reduced from -22.3% to -4.2% after pseudo-weighting.
+Similar improvements were observed across BMI domains, showing that
+multi-reference calibration method can reduce bias not only for overall
+estimates but also for subgroup estimates when relevant auxiliary
+information is distributed across multiple reference surveys.
+
+Several limitations should be considered. First, the package assumes
+that the nonprobability sample and reference surveys are intended to
+represent the same finite population. If the reference surveys target a
+different population or use incompatible inclusion criteria,
+pseudo-weighted estimates may not be meaningful. Second, variables used
+in the participation model must be harmonized before estimation. The
+package can check names and some data structure issues, but it cannot
+determine whether variables are substantively equivalent. Third, the
+current user-facing outcome function focuses on means and prevalence.
+Regression analyses or hypothesis testing are outside the current main
+workflow. Fourth, the package does not impute missing values. It records
+and handles missing values according to the selected `na.action`, but
+users remain responsible for deciding whether complete-case analysis is
+appropriate. Finally, the quality of the resulting pseudo-weighted
+estimator depends on the auxiliary variables available in the
+nonprobability sample and reference surveys. If important determinants
+of participation are absent from all reference surveys, pseudo-weighting
+cannot completely remove participation bias. This limitation is not
+specific to the software implementation; it is inherent to the use of
+reference-survey-based adjustment for nonprobability samples.
+
+From a computational perspective, the current implementation is
+primarily intended for typical applied survey analysis settings. Large
+samples, high-dimensional participation models, sparse factor levels,
+and complex interaction terms can increase memory use and make the
+estimating equations more difficult to solve. Users should therefore
+inspect solver diagnostics, combine sparse categories, and avoid
+unnecessarily complex formulas.
+
+Future extensions could broaden the package in several directions. One
+natural extension is to support additional outcome-analysis tools beyond
+mean (prevalence) estimation, such as regression models or hypothesis
+tests based on fitted pseudo-weights. Another useful direction is to
+expand diagnostic tools for evaluating overlap, pseudo-weight
+distributions, covariate balance, and sensitivity to the choice of
+reference survey ordering. Further work could also consider additional
+tools for handling missing data and computational improvements for
+larger or more complex analyses. These extensions would build on the
+existing two-stage design while preserving the separation between
+pseudo-weight estimation and outcome analysis.
+
+Overall, `nonprobsampling` provides a focused software implementation
+for a common applied problem: estimating finite population means
+(prevalence) from a nonprobability sample when relevant auxiliary
+information is distributed across multiple probability reference
+surveys. By integrating with the `survey` package, `nonprobsampling`
+offers a practical workflow for researchers who need bias-adjusted
+estimates from nonprobability samples. It is thus most appropriately
+regarded as a complement to current R tools for inference from
+nonprobability samples, extending existing workflows by enabling
+pseudo-weight estimation using multiple reference surveys and supporting
+domain specific estimation.
