@@ -29,6 +29,7 @@ The illustration uses the example datasets included in `nonprobsampling`. These 
 ### Construction of the `sc` sample
 
 *Dr. Landsman please add here*
+this is my sentence
 
 **@JIAKUN, MAKE SURE ALL VARIABLE NAMES AND DATA SETS ARE INSIDE QUOTES ``.**
 ** WHAT IS CORRECT, DATASET or DATA SET?**
