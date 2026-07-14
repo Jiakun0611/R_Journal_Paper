@@ -11,7 +11,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-This simulation study evaluates the performance of the multi-reference calibration method for estimating prevalence AND STANDARD ERRORS in a multi-level categorical outcome setting. The data generation and sampling design follows Section 6 of Landsman et al. (2026). The original study used continuous and binary outcomes, the present study extends the simulation framework to a three-level categorical outcome with three population domains. Performance is evaluated USING RELATIVE BIAS, VARIANCE, ETC. for the prevalence of each outcome category within each domain. The study also compares the multi-reference calibration estimator with and without cumulative precalibration.
+This simulation study evaluates the performance of the multi-reference calibration method for estimating prevalence **AND STANDARD ERRORS** in a multi-level categorical outcome setting. The data generation and sampling design follows Section 6 of Landsman et al. (2026). The original study used continuous and binary outcomes, the present study extends the simulation framework to a three-level categorical outcome with three population domains. Performance is evaluated USING RELATIVE BIAS, VARIANCE, ETC. for the prevalence of each outcome category within each domain. The study also compares the multi-reference calibration estimator with and without cumulative precalibration.
 
 ## Finite population and target parameters
 
